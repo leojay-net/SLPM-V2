@@ -1,0 +1,84 @@
+# SLPM Privacy Mixer - Makefile
+# Combines circuit generation, verification, and deployment
+
+.PHONY: help install build-circuit test-circuit generate-proof deploy-verifier clean
+
+help:
+	@echo "SLPM Privacy Mixer - Noir + Garaga Integration"
+	@echo ""
+	@echo "Available targets:"
+	@echo "  install          - Install all required dependencies"
+	@echo "  build-circuit    - Build Noir circuit and generate Garaga verifier"
+	@echo "  test-circuit     - Run Noir circuit tests"
+	@echo "  generate-proof   - Generate a test proof"
+	@echo "  generate-calldata - Generate calldata for verification"
+	@echo "  deploy-verifier  - Deploy verifier contract to Ztarknet"
+	@echo "  verify-on-chain  - Verify a proof on-chain"
+	@echo "  clean            - Clean build artifacts"
+
+install:
+	@echo "📦 Installing dependencies..."
+	@if ! command -v nargo &> /dev/null; then \
+		echo "Installing Noir..."; \
+		curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash; \
+		noirup --version 1.0.0-beta.5; \
+	fi
+	@if ! command -v bb &> /dev/null; then \
+		echo "Installing Barretenberg..."; \
+		curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash; \
+		bbup --version 0.87.4-starknet.1; \
+	fi
+	@if ! command -v garaga &> /dev/null; then \
+		echo "Installing Garaga..."; \
+		pip install garaga==0.18.1; \
+	fi
+	@echo "✅ All dependencies installed"
+
+build-circuit:
+	@./build-circuit.sh
+
+test-circuit:
+	@echo "🧪 Running circuit tests..."
+	@cd circuit && nargo test
+
+generate-proof:
+	@echo "🔐 Generating test proof..."
+	@cd circuit && nargo execute witness
+	@cd circuit && bb prove --scheme ultra_honk --zk --oracle_hash starknet \
+		-b ./target/slpm_privacy_mixer.json \
+		-w ./target/witness.gz \
+		-o ./target
+	@echo "✅ Proof generated at circuit/target/proof"
+
+generate-calldata:
+	@echo "📋 Generating calldata..."
+	@garaga calldata \
+		--system ultra_starknet_zk_honk \
+		--proof circuit/target/proof \
+		--vk circuit/target/vk \
+		--public-inputs circuit/target/public_inputs \
+		> calldata.txt
+	@echo "✅ Calldata saved to calldata.txt"
+
+deploy-verifier:
+	@./deploy-verifier.sh
+
+verify-on-chain:
+	@echo "🔍 Verifying proof on-chain..."
+	@if [ -z "$(CONTRACT)" ]; then \
+		echo "❌ Error: Please set CONTRACT address"; \
+		echo "Usage: make verify-on-chain CONTRACT=0x..."; \
+		exit 1; \
+	fi
+	@sncast call \
+		--contract-address $(CONTRACT) \
+		--function "verify_ultra_starknet_zk_honk_proof" \
+		--calldata $$(cat calldata.txt) \
+		--url https://ztarknet-madara.d.karnot.xyz
+
+clean:
+	@echo "🧹 Cleaning build artifacts..."
+	@rm -rf circuit/target
+	@rm -rf slpm_verifier/target
+	@rm -f calldata.txt
+	@echo "✅ Clean complete"

@@ -1,0 +1,3 @@
+{
+  "/api/lightning/pay/route": "app/api/lightning/pay/route.js"
+}

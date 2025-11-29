@@ -1,0 +1,3 @@
+{
+  "/api/lightning/invoice/route": "app/api/lightning/invoice/route.js"
+}

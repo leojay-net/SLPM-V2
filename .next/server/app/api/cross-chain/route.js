@@ -1,0 +1,11 @@
+var R=require("../../../chunks/[turbopack]_runtime.js")("server/app/api/cross-chain/route.js")
+R.c("server/chunks/[root-of-the-server]__163dc7d8._.js")
+R.c("server/chunks/node_modules_next_dist_esm_build_templates_app-route_1396000b.js")
+R.c("server/chunks/node_modules_@noble_hashes_acbf2564._.js")
+R.c("server/chunks/_850da186._.js")
+R.c("server/chunks/node_modules_206b1074._.js")
+R.c("server/chunks/_2dbaca36._.js")
+R.c("server/chunks/node_modules_next_317e10ab._.js")
+R.m(540304)
+R.m(67711)
+module.exports=R.m(67711).exports

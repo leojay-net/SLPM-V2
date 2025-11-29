@@ -1,0 +1,3 @@
+{
+  "/api/cashu/check-balance/route": "app/api/cashu/check-balance/route.js"
+}

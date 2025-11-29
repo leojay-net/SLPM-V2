@@ -1,0 +1,1 @@
+{"version":1,"contracts":[{"id":"p7c7064aou2s6","package_name":"privacy_verifier","contract_name":"UltraStarknetZKHonkVerifier","module_path":"privacy_verifier::honk_verifier::UltraStarknetZKHonkVerifier","artifacts":{"sierra":"privacy_verifier_UltraStarknetZKHonkVerifier.contract_class.json","casm":"privacy_verifier_UltraStarknetZKHonkVerifier.compiled_contract_class.json"}}]}
