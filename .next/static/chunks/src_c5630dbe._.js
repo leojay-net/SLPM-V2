@@ -2306,6 +2306,129 @@ class RealAtomiqSwapClient {
             throw new Error("Claim failed for swap ".concat(id, ": ").concat(msg));
         }
     }
+    /**
+     * Begin an on-chain BTC → STRK swap and return the Bitcoin deposit address.
+     * Use this when receiving BTC from FixedFloat (ZEC → BTC → STRK flow).
+     * 
+     * @param satsAmount Amount in satoshis to receive
+     * @param recipientAddress Starknet address to receive STRK
+     * @returns Swap ID and Bitcoin deposit address
+     */ async beginBtcToStrkSwap(satsAmount, recipientAddress) {
+        await this.ensureInitialized();
+        if (!this.swapper || !this.tokens) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+        console.log("🔄 (begin) On-chain BTC → STRK swap for amount: ".concat(satsAmount, " sats"));
+        console.log("   Recipient: ".concat(recipientAddress));
+        try {
+            // Create swap: BTC (on-chain) → STRK
+            const swap = await this.swapper.swap(this.tokens.BITCOIN.BTC, this.tokens.STARKNET.STRK, BigInt(satsAmount), true, undefined, recipientAddress // Destination Starknet address
+            );
+            // Get the BTC deposit address - handle different swap types
+            // SpvFromBTCSwap has btcDestinationAddress property
+            // FromBTCSwap has getAddress() method
+            let btcAddress;
+            if ('btcDestinationAddress' in swap && typeof swap.btcDestinationAddress === 'string') {
+                // SpvFromBTCSwap (SPV Vault)
+                btcAddress = swap.btcDestinationAddress;
+            } else if ('getAddress' in swap && typeof swap.getAddress === 'function') {
+                // FromBTCSwap (regular escrow)
+                btcAddress = swap.getAddress();
+            } else if ('address' in swap && typeof swap.address === 'string') {
+                // Fallback: direct property
+                btcAddress = swap.address;
+            } else {
+                var _Object_getPrototypeOf_constructor, _Object_getPrototypeOf;
+                // Debug: log what the swap object looks like
+                console.error('❌ Unknown swap type, available properties:', Object.keys(swap));
+                console.error('❌ Swap prototype:', (_Object_getPrototypeOf = Object.getPrototypeOf(swap)) === null || _Object_getPrototypeOf === void 0 ? void 0 : (_Object_getPrototypeOf_constructor = _Object_getPrototypeOf.constructor) === null || _Object_getPrototypeOf_constructor === void 0 ? void 0 : _Object_getPrototypeOf_constructor.name);
+                throw new Error('Cannot determine BTC deposit address from swap object');
+            }
+            const id = swap.getId();
+            const outputAmount = swap.getOutput();
+            console.log('✅ (begin) On-chain BTC swap created:', {
+                id,
+                btcAddress,
+                expectedStrk: outputAmount.toString()
+            });
+            return {
+                id,
+                btcAddress,
+                expectedStrk: outputAmount.toString()
+            };
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error('❌ Failed to create BTC → STRK swap:', msg);
+            throw new Error("Failed to create BTC → STRK swap: ".concat(msg));
+        }
+    }
+    /**
+     * Wait for an on-chain BTC → STRK swap to complete.
+     * This waits for the BTC deposit to be confirmed and STRK to be sent.
+     */ async waitBtcToStrkCompletion(id) {
+        let timeoutMs = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 600000;
+        // On-chain BTC swaps take longer due to confirmation requirements
+        return this.waitForCompletion(id, timeoutMs);
+    }
+    /**
+     * Claim an on-chain BTC → STRK swap after BTC deposit is confirmed.
+     */ async claimBtcToStrkSwap(id, signer) {
+        await this.ensureInitialized();
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+        const swap = await this.swapper.getSwapById(id);
+        if (!swap) throw new Error("Swap ".concat(id, " not found"));
+        // Use provided signer or fall back to shared account
+        const actualSigner = signer || (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$integrations$2f$starknet$2f$sharedAccount$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["getSharedSwapAccount"])();
+        if (!actualSigner) {
+            throw new Error('No signer available - cannot claim swap');
+        }
+        try {
+            var _swap_getBitcoinTxId, _swap_getOutputTxId;
+            if (typeof swap.canCommitAndClaimInOneShot === 'function' && swap.canCommitAndClaimInOneShot()) {
+                await swap.commitAndClaim(actualSigner);
+            } else {
+                await swap.commit(actualSigner);
+                await swap.claim(actualSigner);
+            }
+            const txId = ((_swap_getBitcoinTxId = swap.getBitcoinTxId) === null || _swap_getBitcoinTxId === void 0 ? void 0 : _swap_getBitcoinTxId.call(swap)) || ((_swap_getOutputTxId = swap.getOutputTxId) === null || _swap_getOutputTxId === void 0 ? void 0 : _swap_getOutputTxId.call(swap)) || undefined;
+            console.log('✅ Claimed BTC → STRK swap on Starknet', {
+                id,
+                txId
+            });
+            return {
+                txId
+            };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('❌ Claim BTC → STRK failed:', msg);
+            throw new Error("Claim failed for swap ".concat(id, ": ").concat(msg));
+        }
+    }
+    /**
+     * Get the BTC → STRK exchange rate (sats per STRK).
+     * Uses the same pricing API as Lightning but for on-chain.
+     */ async getBtcToStrkRate() {
+        await this.ensureInitialized();
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+        try {
+            // Use a reference amount of 100000 sats (0.001 BTC) to get the rate
+            const testSats = BigInt(100000);
+            const strkForSats = await this.swapper.prices.getFromBtcSwapAmount('STARKNET', testSats, this.tokens.STARKNET.STRK.address);
+            // Calculate rate: sats per STRK
+            const strkAmount = Number(strkForSats) / 1e18; // Convert from Wei to STRK
+            const rate = 100000 / strkAmount; // sats per STRK
+            console.log("📊 Atomiq BTC→STRK rate: ".concat(rate.toFixed(2), " sats/STRK"));
+            return rate;
+        } catch (error) {
+            console.error('❌ Failed to get BTC→STRK rate:', error);
+            // Fall back to Lightning rate
+            return this.getStrkToSatsRate();
+        }
+    }
     // Interface-required methods for compatibility
     async getQuote(from, to, amount) {
         let exactIn = arguments.length > 3 && arguments[3] !== void 0 ? arguments[3] : true, sourceAddress = arguments.length > 4 ? arguments[4] : void 0// Source address for STRK -> Lightning swaps
@@ -2975,64 +3098,66 @@ function useCrossChainSwap() {
             return result;
         }
     }["useCrossChainSwap.useCallback[fixedFloatRequest]"], []);
-    // Get quote for ZEC → STRK
+    // Get quote for ZEC → STRK (via on-chain BTC)
     const getZecToStrkQuote = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useCallback"])({
         "useCrossChainSwap.useCallback[getZecToStrkQuote]": async (zecAmount)=>{
             setIsLoading(true);
             setError(null);
             try {
-                // Step 1: Get ZEC → Lightning quote from FixedFloat
-                const zecToLnResult = await fixedFloatRequest('/price', {
+                // Step 1: Get ZEC → BTC (on-chain) quote from FixedFloat
+                const zecToBtcResult = await fixedFloatRequest('/price', {
                     fromCcy: 'ZEC',
-                    toCcy: 'BTCLN',
+                    toCcy: 'BTC',
                     amount: zecAmount.toString(),
                     direction: 'from',
                     type: 'float'
                 });
-                if (zecToLnResult.code !== 0) {
-                    throw new Error(zecToLnResult.msg || 'Failed to get ZEC quote');
+                if (zecToBtcResult.code !== 0) {
+                    throw new Error(zecToBtcResult.msg || 'Failed to get ZEC→BTC quote');
                 }
-                const lightningBtc = parseFloat(zecToLnResult.data.to.amount);
-                const lightningAmount = Math.floor(lightningBtc * 100000000); // sats
-                // Step 2: Get Lightning → STRK estimate using accurate Atomiq rate
+                const btcAmount = parseFloat(zecToBtcResult.data.to.amount);
+                const satsAmount = Math.floor(btcAmount * 100000000); // sats
+                // Step 2: Get BTC → STRK estimate using Atomiq rate
                 let strkAmount = 0;
-                let lnToStrkFee = 0.5; // Default estimate
+                let btcToStrkFee = 0.5; // Default estimate
                 let satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125; // Default fallback
                 if (atomiqClientRef.current) {
                     try {
-                        // Use the accurate rate API instead of creating a quote
-                        satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
-                        console.log("📊 Using Atomiq rate for ZEC→STRK: ".concat(satsPerStrk.toFixed(2), " sats/STRK"));
-                        strkAmount = lightningAmount / satsPerStrk;
+                        // Use the BTC→STRK rate (on-chain rates may differ slightly from Lightning)
+                        satsPerStrk = await atomiqClientRef.current.getBtcToStrkRate();
+                        console.log("📊 Using Atomiq BTC→STRK rate: ".concat(satsPerStrk.toFixed(2), " sats/STRK"));
+                        strkAmount = satsAmount / satsPerStrk;
                     } catch (e) {
-                        // Fallback estimate
-                        console.warn('Using fallback STRK estimate:', e);
-                        strkAmount = lightningAmount / satsPerStrk;
+                        // Fallback to Lightning rate
+                        console.warn('Falling back to Lightning rate:', e);
+                        try {
+                            satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                        } catch (e) {}
+                        strkAmount = satsAmount / satsPerStrk;
                     }
                 } else {
-                    // Fallback estimate
-                    strkAmount = lightningAmount / satsPerStrk;
+                    strkAmount = satsAmount / satsPerStrk;
                 }
-                const zecFee = (zecAmount - lightningBtc) / zecAmount * 100;
+                const zecFee = (zecAmount - btcAmount * parseFloat(zecToBtcResult.data.from.rate || '1')) / zecAmount * 100;
                 const newQuote = {
                     inputAmount: zecAmount,
                     inputCurrency: 'ZEC',
                     outputAmount: strkAmount,
                     outputCurrency: 'STRK',
-                    lightningAmount,
-                    totalFeePercent: zecFee + lnToStrkFee,
+                    lightningAmount: satsAmount,
+                    totalFeePercent: Math.abs(zecFee) + btcToStrkFee,
                     legs: {
                         first: {
                             from: 'ZEC',
-                            to: 'Lightning',
-                            rate: parseFloat(zecToLnResult.data.from.rate),
-                            fee: zecFee
+                            to: 'BTC',
+                            rate: parseFloat(zecToBtcResult.data.from.rate || '1'),
+                            fee: Math.abs(zecFee)
                         },
                         second: {
-                            from: 'Lightning',
+                            from: 'BTC',
                             to: 'STRK',
-                            rate: strkAmount / lightningAmount,
-                            fee: lnToStrkFee
+                            rate: strkAmount / satsAmount * 100000000,
+                            fee: btcToStrkFee
                         }
                     },
                     expiry: Date.now() + 60000
@@ -3129,17 +3254,19 @@ function useCrossChainSwap() {
             let options = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : {};
             setIsLoading(true);
             setError(null);
+            // Updated flow: ZEC → BTC (on-chain via FixedFloat) → STRK (via Atomiq)
+            // This works because FixedFloat can send to regular BTC addresses
             const steps = [
                 {
                     id: 1,
                     name: 'atomiq-swap',
-                    description: 'Creating Atomiq Lightning swap',
+                    description: 'Creating Atomiq BTC→STRK swap',
                     status: 'pending'
                 },
                 {
                     id: 2,
                     name: 'fixedfloat-order',
-                    description: 'Creating ZEC deposit order',
+                    description: 'Creating ZEC→BTC order',
                     status: 'pending'
                 },
                 {
@@ -3150,8 +3277,8 @@ function useCrossChainSwap() {
                 },
                 {
                     id: 4,
-                    name: 'lightning-payment',
-                    description: 'Processing Lightning payment',
+                    name: 'btc-confirmation',
+                    description: 'Waiting for BTC confirmation',
                     status: 'pending'
                 },
                 {
@@ -3173,47 +3300,48 @@ function useCrossChainSwap() {
             };
             setTransfer(newTransfer);
             try {
-                // Step 1: Get quote to know expected Lightning amount
+                // Step 1: Get quote for ZEC → BTC (on-chain, not Lightning)
                 updateStep(newTransfer, 0, 'in-progress', 'Getting swap quote...');
-                const zecToLnResult = await fixedFloatRequest('/price', {
+                const zecToBtcResult = await fixedFloatRequest('/price', {
                     fromCcy: 'ZEC',
-                    toCcy: 'BTCLN',
+                    toCcy: 'BTC',
                     amount: zecAmount.toString(),
                     direction: 'from',
                     type: 'float'
                 });
-                if (zecToLnResult.code !== 0) {
-                    throw new Error(zecToLnResult.msg || 'Failed to get ZEC quote');
+                if (zecToBtcResult.code !== 0) {
+                    throw new Error(zecToBtcResult.msg || 'Failed to get ZEC→BTC quote');
                 }
-                // Get the EXACT BTC amount FixedFloat will send (as a string to preserve precision)
-                const lightningBtcStr = zecToLnResult.data.to.amount;
-                const lightningBtc = parseFloat(lightningBtcStr);
-                const expectedSats = Math.floor(lightningBtc * 100000000);
-                console.log("FixedFloat quote: ".concat(zecAmount, " ZEC → ").concat(lightningBtcStr, " BTC (").concat(expectedSats, " sats)"));
-                // Step 2: Create Atomiq swap to get Lightning invoice for EXACT amount
+                // Get the expected BTC amount
+                const btcAmountStr = zecToBtcResult.data.to.amount;
+                const btcAmount = parseFloat(btcAmountStr);
+                const expectedSats = Math.floor(btcAmount * 100000000);
+                console.log("FixedFloat quote: ".concat(zecAmount, " ZEC → ").concat(btcAmountStr, " BTC (").concat(expectedSats, " sats)"));
+                // Step 2: Create Atomiq swap to get BTC deposit address
                 if (!atomiqClientRef.current) {
                     throw new Error('Atomiq client not initialized. Please wait and try again.');
                 }
-                console.log("Creating Atomiq swap: ".concat(expectedSats, " sats → ").concat(recipientAddress));
-                const atomiqSwap = await atomiqClientRef.current.beginLightningToStrkSwap(expectedSats, recipientAddress);
+                console.log("Creating Atomiq BTC→STRK swap: ".concat(expectedSats, " sats → ").concat(recipientAddress));
+                const atomiqSwap = await atomiqClientRef.current.beginBtcToStrkSwap(expectedSats, recipientAddress);
                 newTransfer.atomiqSwapId = atomiqSwap.id;
                 updateStep(newTransfer, 0, 'complete', 'Atomiq swap created');
                 updateStep(newTransfer, 1, 'in-progress', 'Creating FixedFloat order...');
-                // Step 3: Create FixedFloat order with Atomiq's invoice
-                // Use direction='to' with the EXACT BTC amount to match the invoice
-                console.log("Creating FixedFloat order: ZEC → ".concat(lightningBtcStr, " BTCLN"));
-                console.log("Invoice: ".concat(atomiqSwap.invoice.substring(0, 50), "..."));
-                const orderResult = await fixedFloatRequest('/create', {
+                // Step 3: Create FixedFloat order to send BTC to Atomiq's address
+                console.log("Creating FixedFloat order: ".concat(zecAmount, " ZEC → BTC"));
+                console.log("BTC deposit address (Atomiq): ".concat(atomiqSwap.btcAddress));
+                console.log("Expected STRK output: ".concat(atomiqSwap.expectedStrk));
+                const createPayload = {
                     fromCcy: 'ZEC',
-                    toCcy: 'BTCLN',
-                    amount: lightningBtcStr,
-                    direction: 'to',
+                    toCcy: 'BTC',
+                    amount: zecAmount.toString(),
+                    direction: 'from',
                     type: 'float',
-                    toAddress: atomiqSwap.invoice
-                });
+                    toAddress: atomiqSwap.btcAddress // Atomiq's BTC deposit address
+                };
+                console.log('FixedFloat /create payload:', JSON.stringify(createPayload, null, 2));
+                const orderResult = await fixedFloatRequest('/create', createPayload);
                 console.log('FixedFloat /create response:', JSON.stringify(orderResult, null, 2));
                 if (orderResult.code !== 0) {
-                    // Provide more helpful error messages
                     const errorMsg = orderResult.msg || 'Failed to create FixedFloat order';
                     console.error('FixedFloat order failed:', errorMsg, orderResult);
                     throw new Error(errorMsg);
@@ -3226,11 +3354,14 @@ function useCrossChainSwap() {
                 updateStep(newTransfer, 1, 'complete', 'FixedFloat order created', {
                     orderId: orderResult.data.id,
                     depositAddress,
-                    expectedAmount
+                    expectedAmount,
+                    btcAddress: atomiqSwap.btcAddress
                 });
                 updateStep(newTransfer, 2, 'in-progress', 'Awaiting ZEC deposit');
                 console.log("\n🔔 DEPOSIT ZEC TO: ".concat(depositAddress));
                 console.log("   Amount: ".concat(expectedAmount, " ZEC"));
+                console.log("   → Will convert to BTC and send to Atomiq");
+                console.log("   → Atomiq will send STRK to: ".concat(recipientAddress));
                 setTransfer({
                     ...newTransfer
                 });

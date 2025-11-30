@@ -553,6 +553,160 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
         }
     }
 
+    /**
+     * Begin an on-chain BTC → STRK swap and return the Bitcoin deposit address.
+     * Use this when receiving BTC from FixedFloat (ZEC → BTC → STRK flow).
+     * 
+     * @param satsAmount Amount in satoshis to receive
+     * @param recipientAddress Starknet address to receive STRK
+     * @returns Swap ID and Bitcoin deposit address
+     */
+    async beginBtcToStrkSwap(satsAmount: number, recipientAddress: string): Promise<{
+        id: string;
+        btcAddress: string;
+        expectedStrk: string;
+    }> {
+        await this.ensureInitialized();
+
+        if (!this.swapper || !this.tokens) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+
+        console.log(`🔄 (begin) On-chain BTC → STRK swap for amount: ${satsAmount} sats`);
+        console.log(`   Recipient: ${recipientAddress}`);
+
+        try {
+            // Create swap: BTC (on-chain) → STRK
+            const swap = await this.swapper.swap(
+                this.tokens.BITCOIN.BTC,      // From: On-chain Bitcoin
+                this.tokens.STARKNET.STRK,    // To: STRK token
+                BigInt(satsAmount),           // Amount in sats
+                true,                         // exactIn = true (BTC amount is input)
+                undefined,                    // Source address (will be generated)
+                recipientAddress              // Destination Starknet address
+            );
+
+            // Get the BTC deposit address - handle different swap types
+            // SpvFromBTCSwap has btcDestinationAddress property
+            // FromBTCSwap has getAddress() method
+            let btcAddress: string;
+            if ('btcDestinationAddress' in swap && typeof swap.btcDestinationAddress === 'string') {
+                // SpvFromBTCSwap (SPV Vault)
+                btcAddress = swap.btcDestinationAddress;
+            } else if ('getAddress' in swap && typeof swap.getAddress === 'function') {
+                // FromBTCSwap (regular escrow)
+                btcAddress = swap.getAddress();
+            } else if ('address' in swap && typeof swap.address === 'string') {
+                // Fallback: direct property
+                btcAddress = swap.address;
+            } else {
+                // Debug: log what the swap object looks like
+                console.error('❌ Unknown swap type, available properties:', Object.keys(swap));
+                console.error('❌ Swap prototype:', Object.getPrototypeOf(swap)?.constructor?.name);
+                throw new Error('Cannot determine BTC deposit address from swap object');
+            }
+
+            const id = swap.getId();
+            const outputAmount = swap.getOutput();
+
+            console.log('✅ (begin) On-chain BTC swap created:', {
+                id,
+                btcAddress,
+                expectedStrk: outputAmount.toString()
+            });
+
+            return {
+                id,
+                btcAddress,
+                expectedStrk: outputAmount.toString()
+            };
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error('❌ Failed to create BTC → STRK swap:', msg);
+            throw new Error(`Failed to create BTC → STRK swap: ${msg}`);
+        }
+    }
+
+    /**
+     * Wait for an on-chain BTC → STRK swap to complete.
+     * This waits for the BTC deposit to be confirmed and STRK to be sent.
+     */
+    async waitBtcToStrkCompletion(id: string, timeoutMs: number = 600000): Promise<boolean> {
+        // On-chain BTC swaps take longer due to confirmation requirements
+        return this.waitForCompletion(id, timeoutMs);
+    }
+
+    /**
+     * Claim an on-chain BTC → STRK swap after BTC deposit is confirmed.
+     */
+    async claimBtcToStrkSwap(id: string, signer?: any): Promise<{ txId?: string }> {
+        await this.ensureInitialized();
+
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+
+        const swap = await this.swapper.getSwapById(id);
+        if (!swap) throw new Error(`Swap ${id} not found`);
+
+        // Use provided signer or fall back to shared account
+        const actualSigner = signer || getSharedSwapAccount();
+        if (!actualSigner) {
+            throw new Error('No signer available - cannot claim swap');
+        }
+
+        try {
+            if (typeof swap.canCommitAndClaimInOneShot === 'function' && swap.canCommitAndClaimInOneShot()) {
+                await swap.commitAndClaim(actualSigner);
+            } else {
+                await swap.commit(actualSigner);
+                await swap.claim(actualSigner);
+            }
+
+            const txId = swap.getBitcoinTxId?.() || swap.getOutputTxId?.() || undefined;
+            console.log('✅ Claimed BTC → STRK swap on Starknet', { id, txId });
+            return { txId };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('❌ Claim BTC → STRK failed:', msg);
+            throw new Error(`Claim failed for swap ${id}: ${msg}`);
+        }
+    }
+
+    /**
+     * Get the BTC → STRK exchange rate (sats per STRK).
+     * Uses the same pricing API as Lightning but for on-chain.
+     */
+    async getBtcToStrkRate(): Promise<number> {
+        await this.ensureInitialized();
+
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+
+        try {
+            // Use a reference amount of 100000 sats (0.001 BTC) to get the rate
+            const testSats = BigInt(100000);
+
+            const strkForSats = await this.swapper.prices.getFromBtcSwapAmount(
+                'STARKNET',
+                testSats,
+                this.tokens.STARKNET.STRK.address
+            );
+
+            // Calculate rate: sats per STRK
+            const strkAmount = Number(strkForSats) / 1e18; // Convert from Wei to STRK
+            const rate = 100000 / strkAmount; // sats per STRK
+
+            console.log(`📊 Atomiq BTC→STRK rate: ${rate.toFixed(2)} sats/STRK`);
+            return rate;
+        } catch (error) {
+            console.error('❌ Failed to get BTC→STRK rate:', error);
+            // Fall back to Lightning rate
+            return this.getStrkToSatsRate();
+        }
+    }
+
     // Interface-required methods for compatibility
     async getQuote(
         from: AtomiqSwapQuote['from'],

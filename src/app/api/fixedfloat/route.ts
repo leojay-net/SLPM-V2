@@ -52,6 +52,17 @@ export async function POST(request: NextRequest) {
 
         console.log(`[FixedFloat Proxy] ${endpoint}`, data);
 
+        // Debug: Log full request for /create with BTCLN
+        if (endpoint === '/create' && data?.toCcy === 'BTCLN') {
+            console.log(`[FixedFloat Debug] BTCLN Create Request:`);
+            console.log(`  - fromCcy: ${data.fromCcy}`);
+            console.log(`  - toCcy: ${data.toCcy}`);
+            console.log(`  - amount: ${data.amount}`);
+            console.log(`  - direction: ${data.direction}`);
+            console.log(`  - toAddress (invoice): ${data.toAddress?.substring(0, 80)}...`);
+            console.log(`  - toAddress length: ${data.toAddress?.length}`);
+        }
+
         const response = await fetch(`${FIXEDFLOAT_API}${endpoint}`, {
             method: 'POST',
             headers: {
