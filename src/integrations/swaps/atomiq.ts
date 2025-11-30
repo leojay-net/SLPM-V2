@@ -199,8 +199,9 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
     /**
      * Execute Starknet to Lightning swap for privacy mixing
      * Converts STRK to Lightning for enhanced privacy
+     * @param walletSigner - Optional StarknetSigner from user's wallet. If not provided, uses shared account.
      */
-    async swapStrkToLightning(amount: number, lightningInvoice: string, sourceAddress: string): Promise<SwapResult> {
+    async swapStrkToLightning(amount: number, lightningInvoice: string, sourceAddress: string, walletSigner?: any): Promise<SwapResult> {
         try {
             await this.ensureInitialized();
 
@@ -337,13 +338,25 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
             console.log('   Output: ' + swap.getOutput());
             console.log('   Quote expiry: ' + swap.getQuoteExpiry() + ' (in ' + (swap.getQuoteExpiry() - Date.now()) / 1000 + ' seconds)');
 
-            // Use shared swap account signer if configured
-            const sharedSigner = getSharedSwapAccount();
-            if (sharedSigner) {
-                console.log('🔐 Committing swap with shared account:', sharedSigner.getAddress().slice(0, 10) + '...');
-                await swap.commit(sharedSigner);
+            // Use wallet signer if provided, otherwise fall back to shared account
+            const signer = walletSigner || getSharedSwapAccount();
+            if (signer) {
+                const signerAddress = signer.getAddress?.() || signer.address || 'unknown';
+                console.log('🔐 Committing swap with signer:', signerAddress.slice(0, 10) + '...');
+
+                // Ensure signer has getNonce method that returns BigInt compatible value
+                if (signer.getNonce && typeof signer.getNonce === 'function') {
+                    try {
+                        const nonce = await signer.getNonce();
+                        console.log('   Signer nonce check:', nonce.toString());
+                    } catch (e) {
+                        console.warn('   Signer nonce check failed:', e);
+                    }
+                }
+
+                await swap.commit(signer);
             } else {
-                throw new Error('No shared swap account configured - cannot commit swap');
+                throw new Error('No signer available - provide wallet signer or configure shared swap account');
             }
 
             // Wait for the Lightning payment to complete
@@ -362,8 +375,8 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
             } else {
                 // Payment failed - refund the swap
                 console.log('💸 Lightning payment failed, refunding...');
-                if (sharedSigner) {
-                    await swap.refund(sharedSigner);
+                if (signer) {
+                    await swap.refund(signer);
                     console.log('✅ Swap refunded successfully');
                 }
                 return {
@@ -546,11 +559,11 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
         to: AtomiqSwapQuote['to'],
         amount: bigint,
         exactIn: boolean = true,
-        destinationAddress?: string
+        sourceAddress?: string // Source address for STRK -> Lightning swaps
     ): Promise<AtomiqSwapQuote> {
         await this.ensureInitialized();
 
-        console.log(`🔄 Getting real-time quote for ${from} -> ${to}, amount: ${amount}, exactIn: ${exactIn}`);
+        console.log(`🔄 Getting real-time quote for ${from} -> ${to}, amount: ${amount}, exactIn: ${exactIn}, source: ${sourceAddress}`);
 
         try {
             if (!this.swapper || !this.tokens) {
@@ -560,15 +573,23 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
             const fromToken = this.mapToAtomiqToken(from);
             const toToken = this.mapToAtomiqToken(to);
 
+            // For STRK -> Lightning: 5th param is SOURCE Starknet address, 6th is Lightning invoice
+            // For Lightning -> STRK: 5th param is undefined, 6th is DESTINATION Starknet address
+            const isFromStarknet = from === 'STRK';
+
+            if (isFromStarknet && !sourceAddress) {
+                throw new Error('Source Starknet address required for STRK -> Lightning quotes');
+            }
+
             // Create a quote by creating a swap object (but don't commit it)
-            // This will give us real-time pricing information
+            // swap(srcToken, dstToken, amount, exactIn, src, dst)
             const tempSwap = await this.swapper.swap(
                 fromToken,
                 toToken,
                 amount,
                 exactIn,
-                destinationAddress || undefined,
-                undefined // No Lightning invoice for quote
+                isFromStarknet ? sourceAddress : undefined, // Source for STRK->LN
+                isFromStarknet ? undefined : sourceAddress  // Destination for LN->STRK
             );
 
             // Get pricing information from the swap object
@@ -999,6 +1020,88 @@ export class RealAtomiqSwapClient implements AtomiqSwapClient {
             console.error('❌ Failed to get swap limits:', error);
             throw new Error(`Failed to get swap limits: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+
+    /**
+     * Get the current exchange rate for STRK → Lightning (sats per STRK)
+     * Uses the Atomiq prices API to get the real exchange rate
+     */
+    async getStrkToSatsRate(): Promise<number> {
+        await this.ensureInitialized();
+
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+
+        try {
+            const strkToken = this.tokens.STARKNET.STRK;
+
+            // Use a reference amount of 1 STRK (in Wei) to get the rate
+            const oneStrkInWei = BigInt(1e18); // 1 STRK = 1e18 Wei
+
+            // Use the prices API to convert STRK → sats
+            // getToBtcSwapAmount returns sats for a given token amount
+            const satsForOneStrk = await this.swapper.prices.getToBtcSwapAmount(
+                'STARKNET',
+                oneStrkInWei,
+                strkToken.address
+            );
+
+            const rate = Number(satsForOneStrk);
+            console.log(`📊 Atomiq price API: 1 STRK = ${rate} sats`);
+
+            if (rate > 0 && rate < 10000) { // Sanity check (rate should be ~100-200 sats/STRK)
+                return rate;
+            }
+
+            console.warn(`⚠️ Rate ${rate} seems invalid, using fallback`);
+            return ENV.STRK_SATS_RATE || 125;
+
+        } catch (error) {
+            console.error('❌ Failed to get exchange rate from prices API:', error);
+
+            // Fallback: try to derive from limits
+            try {
+                return await this.getStrkToSatsRateFromLimits();
+            } catch (limitsError) {
+                console.error('❌ Limits fallback also failed:', limitsError);
+                return ENV.STRK_SATS_RATE || 125;
+            }
+        }
+    }
+
+    /**
+     * Fallback method to get rate from swap limits
+     */
+    private async getStrkToSatsRateFromLimits(): Promise<number> {
+        const strkToken = this.tokens.STARKNET.STRK;
+        const btcLnToken = this.tokens.BITCOIN.BTCLN;
+
+        const limits = this.swapper!.getSwapLimits(strkToken, btcLnToken);
+
+        console.log('📊 Trying to derive rate from limits:', {
+            inputMin: limits.input.min?.rawAmount?.toString(),
+            inputMax: limits.input.max?.rawAmount?.toString(),
+            outputMin: limits.output.min?.rawAmount?.toString(),
+            outputMax: limits.output.max?.rawAmount?.toString()
+        });
+
+        // Try to use max limits for better accuracy
+        const inputMaxRaw = limits.input.max?.rawAmount;
+        const outputMaxRaw = limits.output.max?.rawAmount;
+
+        if (inputMaxRaw && outputMaxRaw && inputMaxRaw > 0n && outputMaxRaw > 0n) {
+            const strkMax = Number(inputMaxRaw) / 1e18;
+            const satsMax = Number(outputMaxRaw);
+            const rate = satsMax / strkMax;
+
+            if (rate > 0 && rate < 10000) {
+                console.log(`📊 Derived rate from max limits: ${rate.toFixed(2)} sats/STRK`);
+                return rate;
+            }
+        }
+
+        throw new Error('Could not derive valid rate from limits');
     }
 
     // Utility methods

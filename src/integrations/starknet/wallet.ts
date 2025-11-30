@@ -15,6 +15,7 @@ export interface StarknetAccount {
 export interface WalletConnection {
     account: Account;
     provider: Provider;
+    walletProvider: any; // Raw wallet provider (StarknetWindowObject) for WalletAccount creation
     isConnected: boolean;
     walletType: WalletType;
 }
@@ -143,11 +144,12 @@ export class RealStarknetWalletClient implements StarknetWalletClient {
 
             // IMPORTANT: Use the wallet's provider, not our RPC provider for wallet operations
             // This ensures we maintain the wallet context for balance queries
-            const walletProvider = provider.provider || this.rpcProvider;
+            const walletProviderRpc = provider.provider || this.rpcProvider;
 
             this.connection = {
                 account,
-                provider: walletProvider, // Use wallet's provider to maintain wallet context
+                provider: walletProviderRpc, // Use wallet's provider to maintain wallet context
+                walletProvider: provider, // Store raw wallet provider for WalletAccount creation
                 isConnected: true,
                 walletType,
             };

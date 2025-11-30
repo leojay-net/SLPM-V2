@@ -9,8 +9,10 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { WalletAccount } from 'starknet';
 import { RealAtomiqSwapClient } from '@/integrations/swaps/atomiq';
-import { ENV } from '@/config/env';
+import { StarknetSigner, RpcProviderWithRetries } from '@atomiqlabs/chain-starknet';
+import { ENV, getStarknetRpc } from '@/config/env';
 
 interface TransferStep {
     id: number;
@@ -123,29 +125,24 @@ export function useCrossChainSwap() {
             const lightningBtc = parseFloat(zecToLnResult.data.to.amount);
             const lightningAmount = Math.floor(lightningBtc * 100000000); // sats
 
-            // Step 2: Get Lightning → STRK estimate from Atomiq
+            // Step 2: Get Lightning → STRK estimate using accurate Atomiq rate
             let strkAmount = 0;
             let lnToStrkFee = 0.5; // Default estimate
+            let satsPerStrk = ENV.STRK_SATS_RATE || 125; // Default fallback
 
             if (atomiqClientRef.current) {
                 try {
-                    const atomiqQuote = await atomiqClientRef.current.getQuote(
-                        'BTC_LN',
-                        'STRK',
-                        BigInt(lightningAmount),
-                        true
-                    );
-                    strkAmount = Number(atomiqQuote.amountOut) / 1e18;
-                    lnToStrkFee = Number(atomiqQuote.fee) / lightningAmount * 100;
+                    // Use the accurate rate API instead of creating a quote
+                    satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                    console.log(`📊 Using Atomiq rate for ZEC→STRK: ${satsPerStrk.toFixed(2)} sats/STRK`);
+                    strkAmount = lightningAmount / satsPerStrk;
                 } catch (e) {
                     // Fallback estimate
                     console.warn('Using fallback STRK estimate:', e);
-                    const satsPerStrk = ENV.STRK_SATS_RATE || 125;
                     strkAmount = lightningAmount / satsPerStrk;
                 }
             } else {
                 // Fallback estimate
-                const satsPerStrk = ENV.STRK_SATS_RATE || 125;
                 strkAmount = lightningAmount / satsPerStrk;
             }
 
@@ -183,29 +180,22 @@ export function useCrossChainSwap() {
         setError(null);
 
         try {
-            // Step 1: Estimate STRK → Lightning via Atomiq
+            // Step 1: Get the REAL Atomiq rate for STRK → Lightning
             let lightningAmount = 0;
             let strkToLnFee = 0.5;
-
-            const strkAmountWei = BigInt(Math.floor(strkAmount * 1e18));
+            let satsPerStrk = ENV.STRK_SATS_RATE || 125; // Default fallback
 
             if (atomiqClientRef.current) {
                 try {
-                    const atomiqQuote = await atomiqClientRef.current.getQuote(
-                        'STRK',
-                        'BTC_LN',
-                        strkAmountWei,
-                        true
-                    );
-                    lightningAmount = Number(atomiqQuote.amountOut);
-                    strkToLnFee = Number(atomiqQuote.fee) / Number(strkAmountWei) * 100;
+                    // Use the new rate API to get accurate pricing
+                    satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                    console.log(`📊 Using Atomiq rate: ${satsPerStrk.toFixed(2)} sats/STRK`);
+                    lightningAmount = Math.floor(strkAmount * satsPerStrk);
                 } catch (e) {
-                    console.warn('Using fallback Lightning estimate:', e);
-                    const satsPerStrk = ENV.STRK_SATS_RATE || 125;
+                    console.warn('Failed to get Atomiq rate, using fallback:', e);
                     lightningAmount = Math.floor(strkAmount * satsPerStrk);
                 }
             } else {
-                const satsPerStrk = ENV.STRK_SATS_RATE || 125;
                 lightningAmount = Math.floor(strkAmount * satsPerStrk);
             }
 
@@ -406,32 +396,46 @@ export function useCrossChainSwap() {
         setTransfer(newTransfer);
 
         try {
-            // Step 1: Get STRK → Lightning quote from Atomiq
+            // Step 1: Get STRK → Lightning rate from Atomiq (using accurate rate API)
             updateStep(newTransfer, 0, 'in-progress', 'Getting swap quote...');
 
             if (!atomiqClientRef.current) {
                 throw new Error('Atomiq client not initialized. Please wait and try again.');
             }
 
-            // Estimate how many sats we'll get for our STRK
-            const strkAmountWei = BigInt(Math.floor(strkAmount * 1e18));
-            let estimatedSats = 0;
-
+            // Get the real Atomiq rate for accurate sats estimation
+            let satsPerStrk = ENV.STRK_SATS_RATE || 125; // Default fallback
             try {
-                const atomiqQuote = await atomiqClientRef.current.getQuote(
-                    'STRK',
-                    'BTC_LN',
-                    strkAmountWei,
-                    true
-                );
-                estimatedSats = Number(atomiqQuote.amountOut);
-            } catch (e) {
-                // Fallback estimate
-                const satsPerStrk = ENV.STRK_SATS_RATE || 125;
-                estimatedSats = Math.floor(strkAmount * satsPerStrk);
+                satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                console.log(`📊 Using Atomiq rate: ${satsPerStrk.toFixed(2)} sats/STRK`);
+            } catch (rateError) {
+                console.warn('⚠️ Failed to get Atomiq rate, using fallback:', rateError);
             }
 
-            console.log(`Estimated STRK → Lightning: ${strkAmount} STRK → ${estimatedSats} sats`);
+            // Calculate estimated sats from STRK using the accurate rate
+            const estimatedSats = Math.floor(strkAmount * satsPerStrk);
+            console.log(`Estimated STRK → Lightning: ${strkAmount} STRK → ${estimatedSats} sats (rate: ${satsPerStrk.toFixed(2)})`);
+
+            // Create a proper WalletAccount wrapper for Atomiq SDK compatibility
+            // The SDK expects a WalletAccount with proper walletProvider, not a raw account
+            const walletAddress = walletSigner.address;
+            const rawWalletProvider = walletSigner.walletProvider; // Raw StarknetWindowObject from get-starknet
+
+            if (!rawWalletProvider) {
+                throw new Error('Wallet provider not available. Please reconnect your wallet.');
+            }
+
+            // Create RPC provider for WalletAccount
+            const rpcProvider = new RpcProviderWithRetries({ nodeUrl: getStarknetRpc() });
+
+            // Create WalletAccount - this is what Atomiq SDK expects
+            // WalletAccount(provider, walletProvider, address) properly bridges browser wallets
+            const walletAccount = new WalletAccount(rpcProvider, rawWalletProvider, walletAddress);
+
+            const starknetSigner = new StarknetSigner(walletAccount);
+            const sourceAddress = starknetSigner.getAddress();
+
+            console.log(`Using wallet address for swap: ${sourceAddress}`);
 
             // Step 2: Create FixedFloat order (BTCLN → ZEC)
             // FixedFloat will provide the Lightning invoice we need to pay
@@ -478,7 +482,8 @@ export function useCrossChainSwap() {
             const swapResult = await atomiqClientRef.current.swapStrkToLightning(
                 strkAmount,
                 lightningInvoice,
-                walletSigner.address || walletSigner
+                sourceAddress,
+                starknetSigner // Pass the signer so user signs the transaction
             );
 
             if (!swapResult.success) {

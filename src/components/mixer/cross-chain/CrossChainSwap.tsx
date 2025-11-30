@@ -41,7 +41,7 @@ export function CrossChainSwap() {
         setError
     } = useCrossChainSwap();
 
-    const { isConnected, address, connect, disconnect, isReady: walletReady, client: walletClient } = useWallet();
+    const { isConnected, address, account, walletProvider, connect, disconnect, isReady: walletReady, client: walletClient } = useWallet();
 
     const [activeTransfer, setActiveTransfer] = useState<ActiveTransfer | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -119,18 +119,18 @@ export function CrossChainSwap() {
             } else {
                 // STRK → ZEC flow
                 // This works because WE pay FixedFloat's invoice via Atomiq
-                if (!isConnected || !address) {
+                if (!isConnected || !address || !account || !walletProvider) {
                     setLocalError('STRK → ZEC requires wallet connection. Please connect your Starknet wallet first.');
                     return;
                 }
 
                 console.log('Starting STRK → ZEC flow with wallet:', address);
 
-                // Pass the wallet address to the swap function
+                // Pass the full wallet info so we can create a proper WalletAccount
                 const result = await initiateStrkToZec(
                     data.amount,
                     data.destinationAddress,
-                    { address } // Pass wallet info
+                    { address, account, walletProvider } // Pass wallet info for WalletAccount creation
                 );
 
                 if (!result) {

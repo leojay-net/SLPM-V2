@@ -61,7 +61,8 @@ export function getStarknetRpc(): string {
         case 'MAINNET':
             return 'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_8/kwgGr9GGk4YyLXuGfEvpITv1jpvn3PgP';
         case 'TESTNET':
-            return 'https://starknet-sepolia.public.blastapi.io/rpc/v0_7';
+            // Prefer newer RPC versions for reliable gas pricing fields
+            return 'https://starknet-sepolia.public.blastapi.io/rpc/v0_10';
         default:
             return 'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_8/kwgGr9GGk4YyLXuGfEvpITv1jpvn3PgP';  // Default to mainnet now
     }

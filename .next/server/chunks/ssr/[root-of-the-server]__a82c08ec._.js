@@ -2002,7 +2002,8 @@ class RealAtomiqSwapClient {
     /**
      * Execute Starknet to Lightning swap for privacy mixing
      * Converts STRK to Lightning for enhanced privacy
-     */ async swapStrkToLightning(amount, lightningInvoice, sourceAddress) {
+     * @param walletSigner - Optional StarknetSigner from user's wallet. If not provided, uses shared account.
+     */ async swapStrkToLightning(amount, lightningInvoice, sourceAddress, walletSigner) {
         try {
             await this.ensureInitialized();
             // Preflight: fetch STRK input limits to avoid 'Amount too high' from SDK
@@ -2128,13 +2129,23 @@ class RealAtomiqSwapClient {
             console.log('   Total input: ' + swap.getInput());
             console.log('   Output: ' + swap.getOutput());
             console.log('   Quote expiry: ' + swap.getQuoteExpiry() + ' (in ' + (swap.getQuoteExpiry() - Date.now()) / 1000 + ' seconds)');
-            // Use shared swap account signer if configured
-            const sharedSigner = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$integrations$2f$starknet$2f$sharedAccount$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["getSharedSwapAccount"])();
-            if (sharedSigner) {
-                console.log('🔐 Committing swap with shared account:', sharedSigner.getAddress().slice(0, 10) + '...');
-                await swap.commit(sharedSigner);
+            // Use wallet signer if provided, otherwise fall back to shared account
+            const signer = walletSigner || (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$integrations$2f$starknet$2f$sharedAccount$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["getSharedSwapAccount"])();
+            if (signer) {
+                const signerAddress = signer.getAddress?.() || signer.address || 'unknown';
+                console.log('🔐 Committing swap with signer:', signerAddress.slice(0, 10) + '...');
+                // Ensure signer has getNonce method that returns BigInt compatible value
+                if (signer.getNonce && typeof signer.getNonce === 'function') {
+                    try {
+                        const nonce = await signer.getNonce();
+                        console.log('   Signer nonce check:', nonce.toString());
+                    } catch (e) {
+                        console.warn('   Signer nonce check failed:', e);
+                    }
+                }
+                await swap.commit(signer);
             } else {
-                throw new Error('No shared swap account configured - cannot commit swap');
+                throw new Error('No signer available - provide wallet signer or configure shared swap account');
             }
             // Wait for the Lightning payment to complete
             console.log('⏳ Waiting for Lightning payment...');
@@ -2151,8 +2162,8 @@ class RealAtomiqSwapClient {
             } else {
                 // Payment failed - refund the swap
                 console.log('💸 Lightning payment failed, refunding...');
-                if (sharedSigner) {
-                    await swap.refund(sharedSigner);
+                if (signer) {
+                    await swap.refund(signer);
                     console.log('✅ Swap refunded successfully');
                 }
                 return {
@@ -2299,18 +2310,25 @@ class RealAtomiqSwapClient {
         }
     }
     // Interface-required methods for compatibility
-    async getQuote(from, to, amount, exactIn = true, destinationAddress) {
+    async getQuote(from, to, amount, exactIn = true, sourceAddress// Source address for STRK -> Lightning swaps
+    ) {
         await this.ensureInitialized();
-        console.log(`🔄 Getting real-time quote for ${from} -> ${to}, amount: ${amount}, exactIn: ${exactIn}`);
+        console.log(`🔄 Getting real-time quote for ${from} -> ${to}, amount: ${amount}, exactIn: ${exactIn}, source: ${sourceAddress}`);
         try {
             if (!this.swapper || !this.tokens) {
                 throw new Error('Atomiq SDK not properly initialized');
             }
             const fromToken = this.mapToAtomiqToken(from);
             const toToken = this.mapToAtomiqToken(to);
+            // For STRK -> Lightning: 5th param is SOURCE Starknet address, 6th is Lightning invoice
+            // For Lightning -> STRK: 5th param is undefined, 6th is DESTINATION Starknet address
+            const isFromStarknet = from === 'STRK';
+            if (isFromStarknet && !sourceAddress) {
+                throw new Error('Source Starknet address required for STRK -> Lightning quotes');
+            }
             // Create a quote by creating a swap object (but don't commit it)
-            // This will give us real-time pricing information
-            const tempSwap = await this.swapper.swap(fromToken, toToken, amount, exactIn, destinationAddress || undefined, undefined // No Lightning invoice for quote
+            // swap(srcToken, dstToken, amount, exactIn, src, dst)
+            const tempSwap = await this.swapper.swap(fromToken, toToken, amount, exactIn, isFromStarknet ? sourceAddress : undefined, isFromStarknet ? undefined : sourceAddress // Destination for LN->STRK
             );
             // Get pricing information from the swap object
             const priceInfo = tempSwap.getPriceInfo();
@@ -2677,6 +2695,65 @@ class RealAtomiqSwapClient {
             throw new Error(`Failed to get swap limits: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
+    /**
+     * Get the current exchange rate for STRK → Lightning (sats per STRK)
+     * Uses the Atomiq prices API to get the real exchange rate
+     */ async getStrkToSatsRate() {
+        await this.ensureInitialized();
+        if (!this.swapper || !this.initialized) {
+            throw new Error('Atomiq SDK not initialized');
+        }
+        try {
+            const strkToken = this.tokens.STARKNET.STRK;
+            // Use a reference amount of 1 STRK (in Wei) to get the rate
+            const oneStrkInWei = BigInt(1e18); // 1 STRK = 1e18 Wei
+            // Use the prices API to convert STRK → sats
+            // getToBtcSwapAmount returns sats for a given token amount
+            const satsForOneStrk = await this.swapper.prices.getToBtcSwapAmount('STARKNET', oneStrkInWei, strkToken.address);
+            const rate = Number(satsForOneStrk);
+            console.log(`📊 Atomiq price API: 1 STRK = ${rate} sats`);
+            if (rate > 0 && rate < 10000) {
+                return rate;
+            }
+            console.warn(`⚠️ Rate ${rate} seems invalid, using fallback`);
+            return __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
+        } catch (error) {
+            console.error('❌ Failed to get exchange rate from prices API:', error);
+            // Fallback: try to derive from limits
+            try {
+                return await this.getStrkToSatsRateFromLimits();
+            } catch (limitsError) {
+                console.error('❌ Limits fallback also failed:', limitsError);
+                return __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
+            }
+        }
+    }
+    /**
+     * Fallback method to get rate from swap limits
+     */ async getStrkToSatsRateFromLimits() {
+        const strkToken = this.tokens.STARKNET.STRK;
+        const btcLnToken = this.tokens.BITCOIN.BTCLN;
+        const limits = this.swapper.getSwapLimits(strkToken, btcLnToken);
+        console.log('📊 Trying to derive rate from limits:', {
+            inputMin: limits.input.min?.rawAmount?.toString(),
+            inputMax: limits.input.max?.rawAmount?.toString(),
+            outputMin: limits.output.min?.rawAmount?.toString(),
+            outputMax: limits.output.max?.rawAmount?.toString()
+        });
+        // Try to use max limits for better accuracy
+        const inputMaxRaw = limits.input.max?.rawAmount;
+        const outputMaxRaw = limits.output.max?.rawAmount;
+        if (inputMaxRaw && outputMaxRaw && inputMaxRaw > 0n && outputMaxRaw > 0n) {
+            const strkMax = Number(inputMaxRaw) / 1e18;
+            const satsMax = Number(outputMaxRaw);
+            const rate = satsMax / strkMax;
+            if (rate > 0 && rate < 10000) {
+                console.log(`📊 Derived rate from max limits: ${rate.toFixed(2)} sats/STRK`);
+                return rate;
+            }
+        }
+        throw new Error('Could not derive valid rate from limits');
+    }
     // Utility methods
     parseAtomiqAmount(value) {
         try {
@@ -2803,9 +2880,13 @@ const __TURBOPACK__default__export__ = atomiqClient;
     ()=>useCrossChainSwap
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/dist/server/route-modules/app-page/vendored/ssr/react.js [app-ssr] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$starknet$2f$dist$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/node_modules/starknet/dist/index.mjs [app-ssr] (ecmascript) <locals>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$integrations$2f$swaps$2f$atomiq$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/integrations/swaps/atomiq.ts [app-ssr] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$atomiqlabs$2f$chain$2d$starknet$2f$dist$2f$index$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/@atomiqlabs/chain-starknet/dist/index.js [app-ssr] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/src/config/env.ts [app-ssr] (ecmascript)");
 'use client';
+;
+;
 ;
 ;
 ;
@@ -2872,23 +2953,23 @@ function useCrossChainSwap() {
             }
             const lightningBtc = parseFloat(zecToLnResult.data.to.amount);
             const lightningAmount = Math.floor(lightningBtc * 100000000); // sats
-            // Step 2: Get Lightning → STRK estimate from Atomiq
+            // Step 2: Get Lightning → STRK estimate using accurate Atomiq rate
             let strkAmount = 0;
             let lnToStrkFee = 0.5; // Default estimate
+            let satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125; // Default fallback
             if (atomiqClientRef.current) {
                 try {
-                    const atomiqQuote = await atomiqClientRef.current.getQuote('BTC_LN', 'STRK', BigInt(lightningAmount), true);
-                    strkAmount = Number(atomiqQuote.amountOut) / 1e18;
-                    lnToStrkFee = Number(atomiqQuote.fee) / lightningAmount * 100;
+                    // Use the accurate rate API instead of creating a quote
+                    satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                    console.log(`📊 Using Atomiq rate for ZEC→STRK: ${satsPerStrk.toFixed(2)} sats/STRK`);
+                    strkAmount = lightningAmount / satsPerStrk;
                 } catch (e) {
                     // Fallback estimate
                     console.warn('Using fallback STRK estimate:', e);
-                    const satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
                     strkAmount = lightningAmount / satsPerStrk;
                 }
             } else {
                 // Fallback estimate
-                const satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
                 strkAmount = lightningAmount / satsPerStrk;
             }
             const zecFee = (zecAmount - lightningBtc) / zecAmount * 100;
@@ -2932,22 +3013,21 @@ function useCrossChainSwap() {
         setIsLoading(true);
         setError(null);
         try {
-            // Step 1: Estimate STRK → Lightning via Atomiq
+            // Step 1: Get the REAL Atomiq rate for STRK → Lightning
             let lightningAmount = 0;
             let strkToLnFee = 0.5;
-            const strkAmountWei = BigInt(Math.floor(strkAmount * 1e18));
+            let satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125; // Default fallback
             if (atomiqClientRef.current) {
                 try {
-                    const atomiqQuote = await atomiqClientRef.current.getQuote('STRK', 'BTC_LN', strkAmountWei, true);
-                    lightningAmount = Number(atomiqQuote.amountOut);
-                    strkToLnFee = Number(atomiqQuote.fee) / Number(strkAmountWei) * 100;
+                    // Use the new rate API to get accurate pricing
+                    satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                    console.log(`📊 Using Atomiq rate: ${satsPerStrk.toFixed(2)} sats/STRK`);
+                    lightningAmount = Math.floor(strkAmount * satsPerStrk);
                 } catch (e) {
-                    console.warn('Using fallback Lightning estimate:', e);
-                    const satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
+                    console.warn('Failed to get Atomiq rate, using fallback:', e);
                     lightningAmount = Math.floor(strkAmount * satsPerStrk);
                 }
             } else {
-                const satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
                 lightningAmount = Math.floor(strkAmount * satsPerStrk);
             }
             // Step 2: Get Lightning → ZEC quote from FixedFloat
@@ -3168,23 +3248,39 @@ function useCrossChainSwap() {
         };
         setTransfer(newTransfer);
         try {
-            // Step 1: Get STRK → Lightning quote from Atomiq
+            // Step 1: Get STRK → Lightning rate from Atomiq (using accurate rate API)
             updateStep(newTransfer, 0, 'in-progress', 'Getting swap quote...');
             if (!atomiqClientRef.current) {
                 throw new Error('Atomiq client not initialized. Please wait and try again.');
             }
-            // Estimate how many sats we'll get for our STRK
-            const strkAmountWei = BigInt(Math.floor(strkAmount * 1e18));
-            let estimatedSats = 0;
+            // Get the real Atomiq rate for accurate sats estimation
+            let satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125; // Default fallback
             try {
-                const atomiqQuote = await atomiqClientRef.current.getQuote('STRK', 'BTC_LN', strkAmountWei, true);
-                estimatedSats = Number(atomiqQuote.amountOut);
-            } catch (e) {
-                // Fallback estimate
-                const satsPerStrk = __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["ENV"].STRK_SATS_RATE || 125;
-                estimatedSats = Math.floor(strkAmount * satsPerStrk);
+                satsPerStrk = await atomiqClientRef.current.getStrkToSatsRate();
+                console.log(`📊 Using Atomiq rate: ${satsPerStrk.toFixed(2)} sats/STRK`);
+            } catch (rateError) {
+                console.warn('⚠️ Failed to get Atomiq rate, using fallback:', rateError);
             }
-            console.log(`Estimated STRK → Lightning: ${strkAmount} STRK → ${estimatedSats} sats`);
+            // Calculate estimated sats from STRK using the accurate rate
+            const estimatedSats = Math.floor(strkAmount * satsPerStrk);
+            console.log(`Estimated STRK → Lightning: ${strkAmount} STRK → ${estimatedSats} sats (rate: ${satsPerStrk.toFixed(2)})`);
+            // Create a proper WalletAccount wrapper for Atomiq SDK compatibility
+            // The SDK expects a WalletAccount with proper walletProvider, not a raw account
+            const walletAddress = walletSigner.address;
+            const rawWalletProvider = walletSigner.walletProvider; // Raw StarknetWindowObject from get-starknet
+            if (!rawWalletProvider) {
+                throw new Error('Wallet provider not available. Please reconnect your wallet.');
+            }
+            // Create RPC provider for WalletAccount
+            const rpcProvider = new __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$atomiqlabs$2f$chain$2d$starknet$2f$dist$2f$index$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["RpcProviderWithRetries"]({
+                nodeUrl: (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$config$2f$env$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["getStarknetRpc"])()
+            });
+            // Create WalletAccount - this is what Atomiq SDK expects
+            // WalletAccount(provider, walletProvider, address) properly bridges browser wallets
+            const walletAccount = new __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$starknet$2f$dist$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$locals$3e$__["WalletAccount"](rpcProvider, rawWalletProvider, walletAddress);
+            const starknetSigner = new __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$atomiqlabs$2f$chain$2d$starknet$2f$dist$2f$index$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["StarknetSigner"](walletAccount);
+            const sourceAddress = starknetSigner.getAddress();
+            console.log(`Using wallet address for swap: ${sourceAddress}`);
             // Step 2: Create FixedFloat order (BTCLN → ZEC)
             // FixedFloat will provide the Lightning invoice we need to pay
             const btcAmount = (estimatedSats / 100000000).toFixed(8);
@@ -3218,7 +3314,8 @@ function useCrossChainSwap() {
             // Step 3: Use Atomiq to pay the Lightning invoice with STRK
             updateStep(newTransfer, 1, 'in-progress', 'Processing STRK swap...');
             console.log(`Paying FixedFloat invoice via Atomiq STRK → Lightning swap...`);
-            const swapResult = await atomiqClientRef.current.swapStrkToLightning(strkAmount, lightningInvoice, walletSigner.address || walletSigner);
+            const swapResult = await atomiqClientRef.current.swapStrkToLightning(strkAmount, lightningInvoice, sourceAddress, starknetSigner // Pass the signer so user signs the transaction
+            );
             if (!swapResult.success) {
                 throw new Error(swapResult.error || 'STRK → Lightning swap failed');
             }
@@ -3374,7 +3471,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$context$2f$WalletProv
 ;
 function CrossChainSwap() {
     const { isInitialized, isLoading: hookLoading, error: hookError, transfer, initiateZecToStrk, initiateStrkToZec, cancelTransfer, setError } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$hooks$2f$useCrossChainSwap$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useCrossChainSwap"])();
-    const { isConnected, address, connect, disconnect, isReady: walletReady, client: walletClient } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$context$2f$WalletProvider$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useWallet"])();
+    const { isConnected, address, account, walletProvider, connect, disconnect, isReady: walletReady, client: walletClient } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$context$2f$WalletProvider$2e$tsx__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useWallet"])();
     const [activeTransfer, setActiveTransfer] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(null);
     const [isLoading, setIsLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     const [error, setLocalError] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(null);
@@ -3434,15 +3531,17 @@ function CrossChainSwap() {
             } else {
                 // STRK → ZEC flow
                 // This works because WE pay FixedFloat's invoice via Atomiq
-                if (!isConnected || !address) {
+                if (!isConnected || !address || !account || !walletProvider) {
                     setLocalError('STRK → ZEC requires wallet connection. Please connect your Starknet wallet first.');
                     return;
                 }
                 console.log('Starting STRK → ZEC flow with wallet:', address);
-                // Pass the wallet address to the swap function
+                // Pass the full wallet info so we can create a proper WalletAccount
                 const result = await initiateStrkToZec(data.amount, data.destinationAddress, {
-                    address
-                } // Pass wallet info
+                    address,
+                    account,
+                    walletProvider
+                } // Pass wallet info for WalletAccount creation
                 );
                 if (!result) {
                     await new Promise((resolve)=>setTimeout(resolve, 100));

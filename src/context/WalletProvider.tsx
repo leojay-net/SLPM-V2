@@ -2,11 +2,14 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { RealStarknetWalletClient, type WalletType, type WalletConnection } from '@/integrations/starknet/wallet';
+import type { Account } from 'starknet';
 
 type WalletCtx = {
     isReady: boolean;
     isConnected: boolean;
     address?: string;
+    account?: Account; // Full Account object for signing
+    walletProvider?: any; // Raw wallet provider for WalletAccount creation
     walletType?: WalletType;
     connect: (preferred?: WalletType) => Promise<void>;
     disconnect: () => Promise<void>;
@@ -53,6 +56,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         isReady,
         isConnected: Boolean(conn?.isConnected),
         address: conn?.account?.address,
+        account: conn?.account, // Expose full Account for signing
+        walletProvider: conn?.walletProvider, // Expose raw wallet provider for WalletAccount
         walletType: conn?.walletType,
         connect,
         disconnect,

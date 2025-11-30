@@ -111,7 +111,8 @@ function getStarknetRpc() {
         case 'MAINNET':
             return 'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_8/kwgGr9GGk4YyLXuGfEvpITv1jpvn3PgP';
         case 'TESTNET':
-            return 'https://starknet-sepolia.public.blastapi.io/rpc/v0_7';
+            // Prefer newer RPC versions for reliable gas pricing fields
+            return 'https://starknet-sepolia.public.blastapi.io/rpc/v0_10';
         default:
             return 'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_8/kwgGr9GGk4YyLXuGfEvpITv1jpvn3PgP'; // Default to mainnet now
     }
@@ -539,10 +540,11 @@ class RealStarknetWalletClient {
             const account = provider.account || provider;
             // IMPORTANT: Use the wallet's provider, not our RPC provider for wallet operations
             // This ensures we maintain the wallet context for balance queries
-            const walletProvider = provider.provider || this.rpcProvider;
+            const walletProviderRpc = provider.provider || this.rpcProvider;
             this.connection = {
                 account,
-                provider: walletProvider,
+                provider: walletProviderRpc,
+                walletProvider: provider,
                 isConnected: true,
                 walletType
             };
@@ -1082,6 +1084,8 @@ function WalletProvider(param) {
                 isReady,
                 isConnected: Boolean(conn === null || conn === void 0 ? void 0 : conn.isConnected),
                 address: conn === null || conn === void 0 ? void 0 : (_conn_account = conn.account) === null || _conn_account === void 0 ? void 0 : _conn_account.address,
+                account: conn === null || conn === void 0 ? void 0 : conn.account,
+                walletProvider: conn === null || conn === void 0 ? void 0 : conn.walletProvider,
                 walletType: conn === null || conn === void 0 ? void 0 : conn.walletType,
                 connect,
                 disconnect,
@@ -1100,7 +1104,7 @@ function WalletProvider(param) {
         children: children
     }, void 0, false, {
         fileName: "[project]/src/context/WalletProvider.tsx",
-        lineNumber: 62,
+        lineNumber: 67,
         columnNumber: 12
     }, this);
 }
