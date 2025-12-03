@@ -126,7 +126,7 @@ async function main() {
 
         console.log('\n🔨 Generating ZK proof (UltraHonk)...');
         const backend = new UltraHonkBackend(circuitData.bytecode, { threads: 1 });
-        const proof = await backend.generateProof(execResult.witness, { starknetZK: true });
+        const proof = await backend.generateProof(execResult.witness, { starknet: true });
         backend.destroy();
 
         console.log('✅ Proof generated!');

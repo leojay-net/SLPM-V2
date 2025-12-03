@@ -591,7 +591,7 @@ export function useCrossChainSwap() {
 
             // Create WalletAccount - this is what Atomiq SDK expects
             // WalletAccount(provider, walletProvider, address) properly bridges browser wallets
-            const walletAccount = new WalletAccount(rpcProvider, rawWalletProvider, walletAddress);
+            const walletAccount = new WalletAccount(rpcProvider, rawWalletProvider as any, walletAddress);
 
             const starknetSigner = new StarknetSigner(walletAccount);
             const sourceAddress = starknetSigner.getAddress();

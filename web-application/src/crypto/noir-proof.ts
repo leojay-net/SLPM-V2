@@ -8,7 +8,19 @@
 import { Noir } from '@noir-lang/noir_js';
 import { UltraHonkBackend } from '@aztec/bb.js';
 import { getZKHonkCallData, init as initGaraga } from 'garaga';
-import { poseidon } from 'starknet';
+import { hash } from 'starknet';
+
+function toBase64(bytes: Uint8Array): string {
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(bytes).toString('base64');
+    }
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
 
 export interface PrivacyMixerInputs {
     // Private inputs
@@ -46,14 +58,14 @@ export interface GeneratedProof {
  * Generate a commitment from secret and amount
  */
 export function generateCommitment(secret: string, amountLow: bigint, amountHigh: bigint): string {
-    return poseidon([secret, amountLow.toString(), amountHigh.toString()]);
+    return hash.computePoseidonHashOnElements([secret, amountLow.toString(), amountHigh.toString()]);
 }
 
 /**
  * Generate a nullifier from secret and commitment
  */
 export function generateNullifier(secret: string, commitment: string): string {
-    return poseidon([secret, commitment]);
+    return hash.computePoseidonHashOnElements([secret, commitment]);
 }
 
 /**
@@ -109,7 +121,7 @@ export function buildMerkleTree(commitments: string[], depth: number = 8): strin
         for (let i = 0; i < currentLevel.length; i += 2) {
             const left = currentLevel[i];
             const right = currentLevel[i + 1];
-            const parent = poseidon([left, right]);
+            const parent = hash.computePoseidonHashOnElements([left, right]);
             nextLevel.push(parent);
         }
 
@@ -153,7 +165,7 @@ export function generateMerkleProof(
         for (let i = 0; i < currentLevel.length; i += 2) {
             const left = currentLevel[i];
             const right = currentLevel[i + 1];
-            nextLevel.push(poseidon([left, right]));
+            nextLevel.push(hash.computePoseidonHashOnElements([left, right]));
         }
 
         currentLevel = nextLevel;
@@ -177,20 +189,22 @@ export async function generateWithdrawalProof(
     inputs: PrivacyMixerInputs,
     threads: number = 1
 ): Promise<GeneratedProof> {
+    const bytecodeBase64 = toBase64(circuitBytecode);
+
     // Initialize Noir circuit
     const noir = new Noir({
-        bytecode: circuitBytecode,
+        bytecode: bytecodeBase64,
         abi: circuitAbi,
         debug_symbols: '',
         file_map: {}
     });
 
     // Execute circuit to generate witness
-    const witness = await noir.execute(inputs);
+    const witness = await noir.execute(inputs as any);
 
     // Generate proof using UltraHonk backend
-    const backend = new UltraHonkBackend(circuitBytecode, { threads });
-    const proof = await backend.generateProof(witness.witness, { starknetZK: true });
+    const backend = new UltraHonkBackend(bytecodeBase64, { threads });
+    const proof = await backend.generateProof(witness.witness, { starknet: true });
     backend.destroy();
 
     // Initialize Garaga
@@ -209,8 +223,8 @@ export async function generateWithdrawalProof(
 
     return {
         proof: proof.proof,
-        publicInputs: proof.publicInputs,
-        calldata: callData,
+        publicInputs: proof.publicInputs.map((p: any) => p.toString()),
+        calldata: callData.map((c: any) => c.toString()),
     };
 }
 

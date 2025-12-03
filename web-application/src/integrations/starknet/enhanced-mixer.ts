@@ -11,7 +11,7 @@ import {
     generateMerkleProof,
     type CommitmentData,
     type GeneratedProof,
-} from '../crypto/noir-proof';
+} from '../../crypto/noir-proof';
 
 export interface MixerConfig {
     contractAddress: string;
@@ -225,7 +225,7 @@ export async function createEnhancedPrivacyMixer(
     const provider = new RpcProvider({ nodeUrl: config.rpcUrl });
 
     // Load contract ABI (you need to provide the actual ABI)
-    const contractAbi = []; // Load from enhanced_privacy_mixer ABI
+    const contractAbi: any[] = []; // Load from enhanced_privacy_mixer ABI
 
     const contract = new Contract(
         contractAbi,

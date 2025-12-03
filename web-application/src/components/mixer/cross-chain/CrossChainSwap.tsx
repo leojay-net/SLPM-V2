@@ -137,7 +137,7 @@ export function CrossChainSwap() {
                 const result = await initiateStrkToZec(
                     data.amount,
                     data.destinationAddress,
-                    { address, account, walletProvider }, // Pass wallet info for WalletAccount creation
+                    { address, walletProvider }, // Pass wallet info for WalletAccount creation
                     {
                         usePrivacyMixer: data.usePrivacyMixer,
                         useCashuFlow: data.useCashuFlow

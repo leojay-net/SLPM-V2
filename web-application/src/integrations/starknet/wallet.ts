@@ -159,7 +159,7 @@ export class RealStarknetWalletClient implements StarknetWalletClient {
             console.log('✅ New wallet connection established and cached', {
                 address: this.connection.account.address,
                 walletType: this.connection.walletType,
-                providerType: walletProvider === this.rpcProvider ? 'RPC' : 'Wallet'
+                providerType: walletProviderRpc === this.rpcProvider ? 'RPC' : 'Wallet'
             });
 
             return this.connection;
@@ -519,7 +519,7 @@ export class MockStarknetWalletClient implements StarknetWalletClient {
         this.connected = true;
         return {
             account: {} as Account,
-            provider: {} as Provider,
+            provider: {} as Provider, walletProvider: {} as any,
             isConnected: true,
             walletType: preferredWallet || 'argentX'
         };

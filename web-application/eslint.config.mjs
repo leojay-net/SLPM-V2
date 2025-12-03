@@ -18,27 +18,12 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
-      // Ignore test and script files
-      "**/*.test.ts",
-      "**/*.test.js",
-      "**/test-*.ts",
-      "**/test-*.js",
-      "scripts/**",
-      "circuit/**/*.js",
-      "src/utils/**",
-      "*.js",
     ],
   },
   {
     rules: {
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unused-vars": ["warn", {
-        "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_",
-        "ignoreRestSiblings": true
-      }],
-      "@typescript-eslint/no-require-imports": "off",
-      "prefer-const": "warn",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-unused-vars": "warn",
     },
   },
 ];

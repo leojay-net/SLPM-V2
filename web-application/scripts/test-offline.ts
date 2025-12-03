@@ -4,8 +4,6 @@
  * Tests the complete flow without requiring blockchain deployment
  */
 
-import { poseidon } from '@scure/starknet';
-
 // Mock types since we don't have the actual libraries yet
 type Field = string;
 

@@ -36,7 +36,7 @@ export function generateCommitmentArtifacts(secretHex: string, amount: bigint): 
 }
 
 export function generateProof(secretHex: string, amount: bigint, recipientHex: string): string[] {
-    const secretBig = BigInt(secretHex);
+    // const secretBig = BigInt(secretHex);
     const recipientBig = BigInt(recipientHex);
     const { low, high } = uint256.bnToUint256(amount);
     const recipientHash = hash.computePoseidonHashOnElements([recipientBig]);

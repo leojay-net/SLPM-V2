@@ -47,6 +47,7 @@
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pako": "^2.0.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -57,5 +58,8 @@
   },
   "optionalDependencies": {
     "@atomiqlabs/chain-starknet": "^5.1.5"
+  },
+  "overrides": {
+    "@noble/curves": "1.4.0"
   }
 }
