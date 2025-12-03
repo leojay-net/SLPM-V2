@@ -1,7 +1,0 @@
-[package]
-name = "slpm_privacy_mixer"
-type = "bin"
-authors = ["SLPM Contributors"]
-compiler_version = ">=0.32.0"
-
-[dependencies]

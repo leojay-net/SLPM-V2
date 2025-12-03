@@ -1,9 +1,0 @@
-{
-  "root": "0x0357dd44bfb4ef4e06bbc57dc3b9a48e7271beb9d7b143bb8725921190a6fe63",
-  "recipient": "0x1ad102b4c4b3e40a51b6fb8a446275d600555bd63a95cdceed3e5cef8a6bc1d",
-  "amount_low": "1000000000000000000",
-  "amount_high": "0",
-  "nullifier": "0x27489b9832adfc0bc2fcff1c500e53d9cddc7e44130dfc9a0b4e823a4b9fbfce",
-  "commitment": "0x26fc6c1101de3f0ca3f8fa5ff62b8d939c27f28596358a0ef35e8018e48825da",
-  "secret": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-}
