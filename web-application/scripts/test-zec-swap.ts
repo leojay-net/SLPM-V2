@@ -5,7 +5,7 @@
  *   FIXEDFLOAT_API_KEY=xxx FIXEDFLOAT_API_SECRET=yyy npx ts-node scripts/test-zec-swap.ts
  */
 
-import { ZecSwapService, FixedFloatClient } from '../web-application/src/integrations/zcash/index.js';
+import { ZecSwapService, FixedFloatClient } from '../src/integrations/zcash/index.js';
 
 async function main() {
     console.log('╔═══════════════════════════════════════════════════════════════╗');
