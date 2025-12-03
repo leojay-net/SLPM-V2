@@ -1,143 +1,389 @@
 # SLPM - Starknet Lightning Privacy Mixer
 
-A decentralized privacy solution that breaks on-chain transaction linkability on Starknet by routing funds through multiple privacy-preserving layers: **Zero-Knowledge Proofs → Lightning Network → Cashu Ecash**.
+A decentralized privacy solution that breaks on-chain transaction linkability on Starknet by routing funds through multiple privacy-preserving layers: Zero-Knowledge Proofs, Lightning Network, Cashu Ecash, and Cross-Chain Atomic Swaps.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Starknet](https://img.shields.io/badge/Starknet-Mainnet-purple)](https://starknet.io)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org)
 
-> **⚠️ Status**: Active Development - Testnet deployment recommended for testing
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Privacy Architecture](#privacy-architecture)
+3. [Cross-Chain Privacy Swaps](#cross-chain-privacy-swaps)
+4. [Zero-Knowledge Implementation](#zero-knowledge-implementation)
+5. [Technology Stack](#technology-stack)
+6. [Installation](#installation)
+7. [Usage](#usage)
+8. [SDK](#sdk)
+9. [Security](#security)
+10. [Contributing](#contributing)
+
+---
 
 ## Overview
 
-SLPM provides **military-grade financial privacy** for Starknet transactions through a sophisticated multi-layer architecture that makes it cryptographically impossible to link sender and recipient addresses on-chain.
+SLPM provides financial privacy for Starknet transactions through a sophisticated multi-layer architecture that makes it cryptographically impossible to link sender and recipient addresses on-chain. The system now supports cross-chain privacy swaps between Zcash (ZEC) and Starknet (STRK).
 
-## Overview
+### Key Features
 
-SLPM provides **military-grade financial privacy** for Starknet transactions through a sophisticated multi-layer architecture that makes it cryptographically impossible to link sender and recipient addresses on-chain.
+- Zero-Knowledge Privacy: Cryptographic commitments and nullifiers prevent on-chain linkability
+- Lightning Integration: Instant, untraceable cross-chain routing via Bitcoin Lightning Network
+- Cashu Ecash: Bearer token privacy with offline storage and peer-to-peer transfers
+- Cross-Chain Swaps: Private ZEC to STRK and STRK to ZEC transfers via Atomiq Protocol
+- Noir + Garaga: Production-grade ZK proof generation and on-chain verification
+- Two Mixing Modes: Full Mix (automated) and Split Mix (manual custody)
 
-### 🔒 Privacy Pipeline
+---
+
+## Privacy Architecture
+
+### Privacy Pipeline
 
 ```
-STRK → [Privacy Mixer] → [Lightning] → [Cashu Ecash] → [Lightning] → STRK
-  ↓          ↓               ↓              ↓              ↓          ↓
-Sender   Commitment      Off-chain      Anonymous      Off-chain  Recipient
-        + ZK Proof       Payment         Token          Payment   (Unlinkable)
+                           SLPM PRIVACY PIPELINE
+    ========================================================================
+
+    [DEPOSIT]                                                    [WITHDRAW]
+        |                                                             ^
+        v                                                             |
+    +-------+     +----------+     +--------+     +-------+     +---------+
+    | STRK  | --> | Privacy  | --> | Cashu  | --> | Light | --> | Fresh   |
+    | Funds |     | Mixer    |     | Ecash  |     | ning  |     | Wallet  |
+    +-------+     +----------+     +--------+     +-------+     +---------+
+        |              |                |             |              |
+        v              v                v             v              v
+    Sender         ZK Commit        Anonymous     Off-chain      Recipient
+    Address        + Merkle         Tokens        Payment        (Unlinkable)
+                   Tree
 ```
 
-### ✨ Key Features
+### Four-Layer Privacy
 
-- **🛡️ Zero-Knowledge Privacy**: Cryptographic commitments and nullifiers prevent on-chain linkability
-- **⚡ Lightning Integration**: Instant, untraceable cross-chain routing via Bitcoin Lightning Network
-- **💰 Cashu Ecash**: Bearer token privacy with offline storage and peer-to-peer transfers
-- **🔄 Two Mixing Modes**: 
-  - **Full Mix**: Automated end-to-end privacy (1 minute)
-  - **Split Mix**: Manual custody with enhanced temporal privacy (hours to years)
-- **🎯 Flexible Settlement**: Choose between STRK on-chain or Lightning off-chain at redemption
-- **🔐 Self-Custody**: Complete control over your bearer tokens in Split Mix mode
-- **🌐 Multi-Mint Support**: Enhanced privacy through distribution across multiple Cashu mints
+```
+    Layer 1: Starknet ZK Mixer
+    +------------------------------------------------------------------+
+    |  Deposit: commitment = hash(secret, nullifier, amount)           |
+    |  Withdraw: Prove membership in Merkle tree without revealing     |
+    |            which commitment is yours                             |
+    |  Tech: Noir circuits verified via Garaga on Starknet             |
+    +------------------------------------------------------------------+
 
-## 🏗️ Architecture
+    Layer 2: Lightning Network
+    +------------------------------------------------------------------+
+    |  Off-chain payment routing                                       |
+    |  Multi-hop onion encryption                                      |
+    |  No permanent blockchain record                                  |
+    +------------------------------------------------------------------+
 
-### Core Components
+    Layer 3: Cashu Ecash
+    +------------------------------------------------------------------+
+    |  Blind-signed bearer tokens                                      |
+    |  No ledger tracking transfers                                    |
+    |  Offline storage and peer-to-peer transfers                      |
+    +------------------------------------------------------------------+
 
-### Core Components
+    Layer 4: Cross-Chain Privacy (Zcash)
+    +------------------------------------------------------------------+
+    |  Shielded transactions (z-addresses)                             |
+    |  Groth16 zk-SNARKs                                               |
+    |  Hidden sender, receiver, and amount                             |
+    +------------------------------------------------------------------+
+```
 
-#### 1. **Privacy Mixer Smart Contract** (`contract/src/privacy_mixer.cairo`)
-- Cairo 2.x implementation on Starknet mainnet
-- Commitment/nullifier scheme for deposit-withdrawal unlinkability
-- Zero-knowledge proof verification
-- Emergency withdrawal mechanisms
-- Multi-account support (ArgentX, Braavos, OKX wallets)
+---
 
-#### 2. **Frontend Application** (`src/app/`)
-- Next.js 14 with TypeScript and React
-- Two mixing modes: Full Mix (automated) and Split Mix (manual custody)
-- Real-time progress tracking and event monitoring
-- Responsive UI with privacy-focused design
-- Wallet connection management
+## Cross-Chain Privacy Swaps
 
-#### 3. **Privacy Enhancement Engine** (`src/mixer/privacy.ts`)
-- Temporal mixing with configurable delays
-- Amount obfuscation through intelligent splitting
-- Multi-mint routing for enhanced anonymity
-- Anonymity set batching and optimization
+SLPM integrates with the Atomiq Protocol to enable trustless, privacy-preserving swaps between Zcash and Starknet.
 
-#### 4. **Integration Layer** (`src/integrations/`)
-- **Cashu Client** (`cashu/client.ts`): @cashu/cashu-ts v2.7.2 for ecash operations
-- **Atomiq SDK** (`swaps/atomiq.ts`): @atomiqlabs/sdk v6.0.3 for Lightning↔STRK swaps
-- **Lightning Network** (`lightning/`): BOLT11 invoice handling
-- **Starknet Wallets** (`starknet/wallet.ts`): Multi-wallet provider support
-- **Server-side Melt** (`cashu/direct.ts`): Reliable ecash redemption with retries
+### ZEC to STRK Flow
 
-#### 5. **Orchestration Layer** (`src/orchestrator/`)
-- Session state management and lifecycle
-- Error handling and recovery strategies
-- Progress event system for UI updates
-- Transaction coordination across layers
+```
+    ZEC --> STRK PRIVATE SWAP FLOW
+    =========================================================================
 
-## 🔒 Privacy Guarantees
+    User (ZEC)                                                    User (STRK)
+        |                                                              ^
+        | 1. Send shielded ZEC                                         |
+        |    (z-addr to z-addr)                                        |
+        v                                                              |
+    +-------------+                                                    |
+    | FixedFloat  |  ZEC/BTC Exchange                                  |
+    | Exchange    |  (Transparent swap)                                |
+    +-------------+                                                    |
+        |                                                              |
+        | 2. BTC sent on-chain                                         |
+        v                                                              |
+    +-------------+                                                    |
+    |  Atomiq     |  BTC -> STRK Atomic Swap                           |
+    |  Protocol   |  (HTLC-based, trustless)                           |
+    +-------------+                                                    |
+        |                                                              |
+        | 3. STRK received                                             |
+        v                                                              |
+    +-------------+                                                    |
+    |  Privacy    |  Deposit with commitment                           |
+    |  Mixer      |  Generate ZK proof                                 |
+    +-------------+                                                    |
+        |                                                              |
+        | 4. (Optional) Cashu flow                                     |
+        v                                                              |
+    +-------------+                                                    |
+    |  Cashu      |  Convert to bearer tokens                          |
+    |  Mint       |  Additional privacy layer                          |
+    +-------------+                                                    |
+        |                                                              |
+        | 5. Withdraw to fresh wallet                                  |
+        |    (ZK proof, no link to deposit)                            |
+        +--------------------------------------------------------------+
 
-### Three-Layer Privacy Architecture
+    PRIVACY CHAIN: Zcash Shielded -> BTC -> STRK -> ZK Mixer -> Fresh Wallet
+```
 
-1. **On-Chain Privacy (Starknet)**
-   - Cryptographic commitments hide depositor identity
-   - Zero-knowledge proofs enable unlinkable withdrawals
-   - Nullifier scheme prevents double-spending
-   - Anonymity set grows with each participant
+### STRK to ZEC Flow
 
-2. **Cross-Chain Privacy (Lightning Network)**
-   - Off-chain payment routing breaks transaction graph
-   - No permanent blockchain record
-   - Instant settlement with sub-second finality
-   - Multi-hop routing obscures payment path
+```
+    STRK --> ZEC PRIVATE SWAP FLOW
+    =========================================================================
 
-3. **Bearer Token Privacy (Cashu Ecash)**
-   - Offline storage capability
-   - Peer-to-peer transferability
-   - No ledger tracking transfers
-   - Blind signature scheme for anonymity
+    User (STRK)                                                    User (ZEC)
+        |                                                              ^
+        | 1. Deposit to Privacy Mixer                                  |
+        |    (Generate commitment)                                     |
+        v                                                              |
+    +-------------+                                                    |
+    |  Privacy    |  commitment = hash(secret, nullifier, amount)      |
+    |  Mixer      |  Store in Merkle tree                              |
+    +-------------+                                                    |
+        |                                                              |
+        | 2. (Optional) Cashu flow                                     |
+        v                                                              |
+    +-------------+                                                    |
+    |  Cashu      |  Mint bearer tokens                                |
+    |  Mint       |  Blind signatures                                  |
+    +-------------+                                                    |
+        |                                                              |
+        | 3. Withdraw with ZK proof                                    |
+        |    Initiate Lightning payment                                |
+        v                                                              |
+    +-------------+                                                    |
+    |  Atomiq     |  STRK -> Lightning                                 |
+    |  Protocol   |  HTLC atomic swap                                  |
+    +-------------+                                                    |
+        |                                                              |
+        | 4. Lightning to ZEC                                          |
+        v                                                              |
+    +-------------+                                                    |
+    | FixedFloat  |  BTCLN -> ZEC                                      |
+    | Exchange    |  Shielded output                                   |
+    +-------------+                                                    |
+        |                                                              |
+        | 5. Receive shielded ZEC                                      |
+        +--------------------------------------------------------------+
 
-### Privacy Strength
+    PRIVACY CHAIN: ZK Mixer -> Lightning -> Zcash Shielded
+```
 
-| Feature | Full Mix | Split Mix (STRK) | Split Mix (Lightning) |
-|---------|----------|------------------|----------------------|
-| On-chain unlinkability | ✅ Yes | ✅ Yes | ✅ Yes |
-| Bearer token privacy | ✅ Yes | ✅ Yes | ✅ Yes |
-| Temporal disconnect | Minutes | Hours to Years | Hours to Years |
-| User custody | No (automated) | Yes | Yes |
-| Offline storage | No | Yes | Yes |
-| Blockchain footprint | Starknet tx | Starknet tx | **None** |
-| Wallet required | Yes | Yes (claiming) | **No** |
+### Atomiq Protocol Integration
 
-### Attack Resistance
+The Atomiq Protocol enables trustless atomic swaps between Starknet and Bitcoin/Lightning:
 
-- **✅ Timing Analysis**: Variable delays and batching prevent correlation
-- **✅ Amount Correlation**: Splitting and standardization obfuscate values
-- **✅ Graph Analysis**: Commitment scheme breaks transaction graph
-- **✅ Statistical Disclosure**: Large anonymity sets (100-10,000+) provide strong privacy
+```
+    ATOMIQ ATOMIC SWAP (STRK <-> BTC)
+    =========================================================================
 
-## 🚀 Quick Start
+    +-------------------+                      +-------------------+
+    |   User Wallet     |                      |  Atomiq Liquidity |
+    |   (Starknet)      |                      |  Provider (BTC)   |
+    +-------------------+                      +-------------------+
+            |                                          |
+            |  1. Create HTLC on Starknet              |
+            |     Lock STRK with hash(preimage)        |
+            +----------------------------------------->|
+            |                                          |
+            |  2. Create HTLC on Lightning             |
+            |     Lock BTC with same hash              |
+            |<-----------------------------------------+
+            |                                          |
+            |  3. User reveals preimage                |
+            |     Claims BTC on Lightning              |
+            +----------------------------------------->|
+            |                                          |
+            |  4. LP uses preimage                     |
+            |     Claims STRK on Starknet              |
+            |<-----------------------------------------+
+            |                                          |
+
+    SECURITY: Cryptographic atomicity - either both transfers complete
+              or both are refunded. No counterparty risk.
+```
+
+---
+
+## Zero-Knowledge Implementation
+
+SLPM uses Noir circuits compiled to UltraHonk proofs, verified on-chain via Garaga.
+
+### Noir Circuit Architecture
+
+```
+    NOIR CIRCUIT: Privacy Withdrawal Proof
+    =========================================================================
+
+    PRIVATE INPUTS (known only to prover):
+    +------------------------------------------------------------------+
+    |  secret: Field              - Random value chosen at deposit     |
+    |  path_elements: [Field; 8]  - Merkle proof siblings              |
+    |  path_indices: [Field; 8]   - Left/right path indicators         |
+    +------------------------------------------------------------------+
+
+    PUBLIC INPUTS (verified on-chain):
+    +------------------------------------------------------------------+
+    |  nullifier_hash: Field      - Prevents double-spending           |
+    |  root: Field                - Merkle tree root                   |
+    |  recipient: Field           - Withdrawal address                 |
+    |  amount_low: Field          - Amount (u128 low bits)             |
+    |  amount_high: Field         - Amount (u128 high bits)            |
+    +------------------------------------------------------------------+
+
+    CIRCUIT LOGIC:
+    +------------------------------------------------------------------+
+    |  1. commitment = Poseidon(secret, amount_low, amount_high)       |
+    |  2. nullifier = Poseidon(secret, commitment)                     |
+    |  3. assert nullifier_hash == Poseidon(nullifier)                 |
+    |  4. computed_root = MerkleVerify(commitment, path, indices)      |
+    |  5. assert computed_root == root                                 |
+    +------------------------------------------------------------------+
+
+    OUTPUT: ZK proof that prover knows a valid commitment in the tree
+            without revealing which one
+```
+
+### Garaga Verification Pipeline
+
+```
+    GARAGA ON-CHAIN VERIFICATION
+    =========================================================================
+
+    CLIENT SIDE                              STARKNET
+    +-----------------+                      +------------------------+
+    |                 |                      |                        |
+    | 1. Compute      |                      |                        |
+    |    witness      |                      |                        |
+    |                 |                      |                        |
+    | 2. Generate     |   proof + hints      |  4. Garaga Verifier    |
+    |    UltraHonk    | -------------------> |     Contract           |
+    |    proof        |                      |     - Parse proof      |
+    |                 |                      |     - Verify pairing   |
+    | 3. Prepare      |                      |     - Extract pubins   |
+    |    calldata     |                      |                        |
+    |                 |                      |  5. Privacy Mixer      |
+    +-----------------+                      |     Contract           |
+                                             |     - Check nullifier  |
+                                             |     - Verify root      |
+                                             |     - Transfer funds   |
+                                             +------------------------+
+
+    GAS EFFICIENCY: Garaga uses native Cairo circuits for elliptic curve
+                   operations, achieving ~10x gas savings vs generic
+                   pairing verification
+```
+
+### Merkle Tree Structure
+
+```
+    MERKLE TREE (Depth 8 = 256 commitments)
+    =========================================================================
+
+                              ROOT
+                               |
+                 +-------------+-------------+
+                 |                           |
+               H(0,1)                      H(2,3)
+                 |                           |
+          +------+------+             +------+------+
+          |             |             |             |
+        H(0)          H(1)          H(2)          H(3)
+          |             |             |             |
+       +--+--+       +--+--+       +--+--+       +--+--+
+       |     |       |     |       |     |       |     |
+      C0    C1      C2    C3      C4    C5      C6    C7
+       |     |       |     |       |     |       |     |
+      ...   ...     ...   ...     ...   ...     ...   ...
+
+    C0-C255: Commitments = Poseidon(secret, nullifier, amount)
+
+    ANONYMITY SET: Each deposit adds to the set. Withdrawer proves
+                   membership without revealing which commitment.
+```
+
+---
+
+## Technology Stack
+
+### Core Technologies
+
+| Component       | Technology             | Purpose                     |
+| --------------- | ---------------------- | --------------------------- |
+| Frontend        | Next.js 14, TypeScript | Web application             |
+| Smart Contracts | Cairo 2.x              | Starknet privacy mixer      |
+| ZK Circuits     | Noir                   | Privacy proof generation    |
+| ZK Verification | Garaga                 | On-chain proof verification |
+| Atomic Swaps    | Atomiq SDK             | STRK/BTC trustless swaps    |
+| Ecash           | Cashu                  | Bearer token privacy        |
+| Exchange        | FixedFloat API         | ZEC/BTC conversion          |
+
+### Integration Stack
+
+```
+    APPLICATION LAYER
+    +------------------------------------------------------------------+
+    |  Next.js 14 + TypeScript + React                                 |
+    |  Tailwind CSS + Heroicons                                        |
+    +------------------------------------------------------------------+
+                                    |
+    BLOCKCHAIN LAYER
+    +------------------------------------------------------------------+
+    |  Starknet.js v7.6.4      - Starknet RPC interaction              |
+    |  @atomiqlabs/sdk v6.0.3  - Lightning/STRK atomic swaps           |
+    |  @cashu/cashu-ts v2.7.2  - Ecash minting/melting                 |
+    |  get-starknet v4.0.3     - Wallet connection                     |
+    +------------------------------------------------------------------+
+                                    |
+    SMART CONTRACT LAYER
+    +------------------------------------------------------------------+
+    |  Cairo 2.x               - Privacy mixer contract                |
+    |  Noir                    - ZK circuit definitions                |
+    |  Garaga                  - UltraHonk verifier                    |
+    +------------------------------------------------------------------+
+```
+
+---
+
+## Installation
 
 ### Prerequisites
 
 - Node.js 18+ and npm
 - Starknet wallet (ArgentX, Braavos, or OKX)
-- Lightning wallet (optional, for Split Mix Lightning settlement)
+- (Optional) Noir toolchain for circuit development
+- (Optional) Garaga for verifier generation
 
-### Installation
+### Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/leojay-net/SLPM.git
-cd SLPM
+git clone https://github.com/your-repo/SLPM-enhanced.git
+cd SLPM-enhanced
 
 # Install dependencies
 npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Edit .env.local with your configuration
 
 # Run development server
 npm run dev
@@ -145,266 +391,233 @@ npm run dev
 
 ### Environment Configuration
 
-Create `.env.local` with the following variables:
-
 ```bash
 # Network Configuration
-NEXT_PUBLIC_NETWORK=MAINNET  # or TESTNET
+NEXT_PUBLIC_NETWORK=MAINNET
 
-# Starknet Configuration
+# Starknet RPC
 NEXT_PUBLIC_STARKNET_RPC=https://starknet-mainnet.public.blastapi.io
-STARKNET_RPC=https://starknet-mainnet.public.blastapi.io
 
-# Privacy Mixer Contract (Mainnet)
+# Privacy Mixer Contract
 NEXT_PUBLIC_MIXER_CONTRACT_ADDRESS=0x05effdcfda86066c72c108e174c55a4f8d1249ba69f80e975d7fc814199a376b
-MIXER_CONTRACT_ADDRESS=0x05effdcfda86066c72c108e174c55a4f8d1249ba69f80e975d7fc814199a376b
 
-# Shared Swap Account (for automated swaps)
-NEXT_PUBLIC_SHARED_SWAP_ACCOUNT_PRIVATE_KEY=0x...
-SHARED_SWAP_ACCOUNT_PRIVATE_KEY=0x...
-NEXT_PUBLIC_SHARED_SWAP_ACCOUNT_ADDRESS=0x...
-SHARED_SWAP_ACCOUNT_ADDRESS=0x...
-
-# Cashu Mint Configuration
+# Cashu Mint
 NEXT_PUBLIC_CASHU_DEFAULT_MINT=https://mint.lnserver.com
-CASHU_MINT=https://mint.lnserver.com
 
-# Atomiq Configuration
+# Atomiq Network
 NEXT_PUBLIC_ATOMIQ_NETWORK=mainnet
-ATOMIQ_NETWORK=mainnet
+
+# FixedFloat API (for cross-chain swaps)
+FIXEDFLOAT_API_KEY=your_api_key
+FIXEDFLOAT_API_SECRET=your_api_secret
 ```
 
-### Usage
-
-1. **Navigate to the application**: Open http://localhost:3000
-2. **Connect your wallet**: Click "Connect Wallet" and select your preferred provider
-3. **Choose mixing mode**:
-   - **Full Mix**: Automated privacy mixing (recommended for beginners)
-   - **Split Mix**: Manual custody with enhanced privacy (advanced users)
-4. **Follow the guided flow** to complete your privacy-enhanced transfer
-
-## 💡 Use Cases
-
-### Personal Privacy
-- 💼 Receive salary without employer tracking spending patterns
-- 🎁 Make anonymous donations to causes
-- 🛒 Purchase goods/services without vendor profiling
-- 💰 Accumulate savings without surveillance
-
-### Business Applications
-- 📦 Confidential supplier payments
-- 👔 Anonymous payroll for sensitive operations
-- 🏛️ Private treasury management
-- 🔍 Protect competitive intelligence
-
-### Split Mix Benefits
-- 🕐 **Time flexibility**: Redeem hours, days, or years later
-- 🎁 **Gift tokens**: Transfer value peer-to-peer offline
-- 💾 **Backup resilience**: Store in multiple secure locations
-- 🌍 **Geographic privacy**: Issue and redeem from different locations
-- ⚡ **Lightning settlement**: Pay invoices directly without on-chain footprint
-
-## 📋 Technology Stack
-
-### Frontend
-- **Next.js 14**: React framework with App Router
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first styling
-- **Heroicons**: UI icons
-
-### Blockchain & Crypto
-- **Starknet.js v7.6.4**: Starknet blockchain interaction
-- **@atomiqlabs/sdk v6.0.3**: Lightning↔STRK atomic swaps
-- **@cashu/cashu-ts v2.7.2**: Cashu ecash protocol
-- **get-starknet v4.0.3**: Multi-wallet connection
-
-### Smart Contract
-- **Cairo 2.x**: Starknet smart contract language
-- **Scarb**: Cairo package manager
-- **Starknet Foundry**: Testing framework
-
-### Development Tools
-- **ESLint & Prettier**: Code quality
-- **TypeScript**: Static type checking
-- **dotenv**: Environment management
-
-## 📁 Project Structure
-
-```
-slpm/
-├── contract/               # Cairo smart contracts
-│   ├── src/
-│   │   ├── privacy_mixer.cairo
-│   │   └── lib.cairo
-│   └── tests/
-├── src/
-│   ├── app/               # Next.js pages and API routes
-│   │   ├── mixer/         # Full Mix UI
-│   │   │   └── split/     # Split Mix UI
-│   │   └── api/           # Server-side endpoints
-│   │       └── cashu/     # Cashu operations
-│   ├── components/        # React components
-│   │   └── mixer/
-│   │       └── split/     # Split Mix components
-│   ├── integrations/      # External service clients
-│   │   ├── cashu/         # Cashu SDK integration
-│   │   ├── swaps/         # Atomiq SDK integration
-│   │   ├── starknet/      # Wallet & contract
-│   │   └── lightning/     # Lightning Network
-│   ├── orchestrator/      # Business logic
-│   │   └── steps/         # Mixing flow steps
-│   ├── mixer/             # Privacy engine
-│   ├── domain/            # Type definitions
-│   ├── config/            # Configuration
-│   ├── context/           # React contexts
-│   ├── utils/             # Utilities
-│   └── storage/           # Data persistence
-└── docs/                  # Documentation
-    └── MIXER_ARCHITECTURE.md
-```
-
-## 🔧 Development
-
-### Smart Contract Development
+### ZK Circuit Setup (Optional)
 
 ```bash
-cd contract
+# Install Noir toolchain
+curl -L https://raw.githubusercontent.com/noir-lang/noirup/refs/heads/main/install | bash
+noirup --version 1.0.0-beta.5
 
-# Install dependencies
-scarb build
+# Install Barretenberg (UltraHonk backend)
+curl -L https://raw.githubusercontent.com/AztecProtocol/aztec-packages/refs/heads/master/barretenberg/bbup/install | bash
+bbup --version 0.87.4-starknet.1
 
-# Run tests
-snforge test
+# Install Garaga
+pip install garaga==0.18.1
 
-# Deploy to testnet
-sncast --profile testnet deploy \
-  --class-hash <hash> \
-  --constructor-calldata <args>
+# Build circuit and generate verifier
+./build-circuit.sh
 ```
-
-### Frontend Development
-
-```bash
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-
-# Run linter
-npm run lint
-
-# Format code
-npm run format
-```
-
-### Testing
-
-```bash
-# Run Cashu integration tests
-npm run test:cashu
-
-# Test specific functionality
-npm run test:mixer
-npm run test:swaps
-```
-
-## 🔐 Security
-
-### Smart Contract Security
-- ✅ Emergency pause functionality
-- ✅ Commitment uniqueness validation
-- ✅ Nullifier double-spend prevention
-- ✅ Access control for admin functions
-- ✅ Reentrancy protection
-
-### Application Security
-- ✅ Environment variable validation
-- ✅ Input sanitization and validation
-- ✅ Secure key storage recommendations
-- ✅ HTTPS enforcement
-- ✅ Privacy-preserving error messages
-
-### Cryptographic Security
-- ✅ Collision-resistant hash functions
-- ✅ Zero-knowledge proof verification
-- ✅ Blind signature schemes (Cashu)
-- ✅ Secure random number generation
-
-### Operational Security
-- 🔄 Automatic refund mechanisms
-- 🔄 Timeout protection (30-60s limits)
-- 🔄 Circuit breakers for service failures
-- 🔄 Comprehensive error handling
-
-## � Documentation
-
-- **[Architecture Overview](./docs/MIXER_ARCHITECTURE.md)**: Detailed system design and privacy mechanisms
-- **[Smart Contract Docs](./contract/README.md)**: Cairo contract implementation details
-- **[API Reference](./docs/API.md)**: Server-side endpoint documentation
-- **[Privacy Analysis](./docs/PRIVACY.md)**: Security guarantees and threat model
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Commit your changes**: `git commit -m 'Add amazing feature'`
-4. **Push to branch**: `git push origin feature/amazing-feature`
-5. **Open a Pull Request**
-
-### Development Guidelines
-- Write comprehensive tests for new features
-- Follow existing code style and conventions
-- Update documentation for API changes
-- Ensure privacy guarantees are maintained
-- Add security considerations for cryptographic changes
-
-## � License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## ⚠️ Disclaimer
-
-**Important Security Notice:**
-
-This software is provided for educational and research purposes. While we implement industry-standard cryptographic primitives and privacy-enhancing technologies:
-
-- **No Warranty**: This software is provided "as is" without warranty of any kind
-- **Testnet First**: Always test on Starknet testnet before mainnet deployment
-- **Regulatory Compliance**: Review applicable regulations in your jurisdiction
-- **Audit Recommended**: Independent security audit recommended before production use
-- **Beta Software**: Active development - features and APIs may change
-
-**Privacy Notice:**
-
-- Cashu mints are custodial - choose reputable mints carefully
-- Atomiq swaps require sufficient liquidity
-- Network fees apply to all on-chain transactions
-- Backup your ecash tokens - they are bearer instruments
-
-## 🔗 Links
-
-- **Live Demo**: [slpm.example.com](https://slpm.example.com) (Coming soon)
-- **Documentation**: [docs.slpm.example.com](https://docs.slpm.example.com)
-- **GitHub**: [github.com/leojay-net/SLPM](https://github.com/leojay-net/SLPM)
-- **Starknet Contract**: [Starkscan Explorer](https://starkscan.co)
-- **Twitter**: [@SLPM_Privacy](https://twitter.com/SLPM_Privacy)
-- **Discord**: [Join our community](https://discord.gg/slpm)
-
-## 🙏 Acknowledgments
-
-- **Starknet** for the scalable L2 infrastructure
-- **Atomiq Labs** for Lightning↔Starknet atomic swaps
-- **Cashu** for the ecash protocol implementation
-- **Open-source contributors** who make privacy technology accessible
 
 ---
 
-**Built with privacy in mind. 🔒**
+## SDK
 
-*"Privacy is not about hiding, it's about freedom."*
+SLPM provides a standalone SDK for programmatic integration.
+
+### Installation
+
+```bash
+npm install @slpm/sdk
+```
+
+### Basic Usage
+
+```typescript
+import { SLPM } from '@slpm/sdk';
+import { Account, RpcProvider } from 'starknet';
+
+// Initialize
+const provider = new RpcProvider({ nodeUrl: 'https://...' });
+const account = new Account(provider, address, privateKey);
+
+const slpm = new SLPM({
+  account,
+  network: 'mainnet',
+  rpcUrl: 'https://starknet-mainnet.public.blastapi.io',
+});
+
+// Privacy deposit
+const deposit = await slpm.deposit({
+  amount: BigInt('1000000000000000000'), // 1 STRK
+});
+
+// Withdraw to fresh address (breaks linkability)
+await slpm.withdraw({
+  commitment: deposit.commitment,
+  recipient: '0xFRESH_ADDRESS',
+  amount: BigInt('1000000000000000000'),
+});
+```
+
+### Cross-Chain Swap
+
+```typescript
+// STRK to ZEC with privacy
+await slpm.swap({
+  direction: 'strk-to-zec',
+  amount: '10',
+  destinationAddress: 'zs1...',
+  usePrivacyMixer: true,
+  useCashuFlow: true,
+});
+```
+
+### SDK Modules
+
+| Module  | Import              | Purpose           |
+| ------- | ------------------- | ----------------- |
+| Core    | `@slpm/sdk`         | Main orchestrator |
+| Privacy | `@slpm/sdk/privacy` | Mixer operations  |
+| Swaps   | `@slpm/sdk/swaps`   | Cross-chain swaps |
+| Cashu   | `@slpm/sdk/cashu`   | Ecash operations  |
+
+---
+
+## Project Structure
+
+```
+slpm/
++-- contract/                 # Cairo smart contracts
+|   +-- src/
+|   |   +-- privacy_mixer.cairo
+|   |   +-- lib.cairo
+|   +-- tests/
++-- circuit/                  # Noir ZK circuits
+|   +-- src/
+|   |   +-- main.nr
+|   +-- Nargo.toml
++-- sdk/                      # Standalone SDK
+|   +-- src/
+|   |   +-- core.ts
+|   |   +-- privacy/
+|   |   +-- swaps/
+|   |   +-- cashu/
++-- src/
+|   +-- app/                  # Next.js pages
+|   |   +-- mixer/
+|   |   |   +-- split/
+|   |   |   +-- cross-chain/
+|   |   +-- api/
+|   +-- components/           # React components
+|   |   +-- mixer/
+|   +-- integrations/         # External services
+|   |   +-- cashu/
+|   |   +-- swaps/
+|   |   +-- starknet/
+|   +-- hooks/                # React hooks
+|   |   +-- useCrossChainSwap.ts
+|   +-- crypto/               # Cryptographic utilities
++-- docs/                     # Documentation
+```
+
+---
+
+## Security
+
+### Smart Contract Security
+
+- Emergency pause functionality
+- Commitment uniqueness validation
+- Nullifier double-spend prevention
+- Access control for admin functions
+- Reentrancy protection
+
+### Cryptographic Security
+
+- Poseidon hash for Starknet compatibility
+- UltraHonk ZK proofs via Noir
+- Garaga on-chain verification
+- Blind signatures (Cashu BDHKE)
+
+### Operational Security
+
+- API keys secured server-side
+- Environment variable validation
+- Timeout protection (30-60s limits)
+- Comprehensive error handling
+
+---
+
+## Documentation
+
+| Document                                                                | Description                   |
+| ----------------------------------------------------------------------- | ----------------------------- |
+| [MIXER_ARCHITECTURE.md](./docs/MIXER_ARCHITECTURE.md)                   | Detailed privacy mixer design |
+| [NOIR_INTEGRATION.md](./docs/NOIR_INTEGRATION.md)                       | Noir circuit implementation   |
+| [ZTARKNET_GARAGA_INTEGRATION.md](./docs/ZTARKNET_GARAGA_INTEGRATION.md) | Garaga verifier setup         |
+| [CROSS_CHAIN_ARCHITECTURE.md](./docs/CROSS_CHAIN_ARCHITECTURE.md)       | ZEC/STRK swap flows           |
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/new-feature`
+3. Commit changes: `git commit -m 'Add new feature'`
+4. Push to branch: `git push origin feature/new-feature`
+5. Open a Pull Request
+
+### Development Guidelines
+
+- Write tests for new features
+- Follow existing code style
+- Update documentation for API changes
+- Ensure privacy guarantees are maintained
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## Disclaimer
+
+This software is provided for educational and research purposes.
+
+- No warranty of any kind
+- Test on testnet before mainnet
+- Review applicable regulations
+- Independent security audit recommended
+- Cashu mints are custodial - choose reputable mints
+- Backup bearer tokens - they are bearer instruments
+
+---
+
+## Links
+
+- Documentation: [docs/](./docs/)
+- GitHub: [github.com/your-repo/SLPM-enhanced](https://github.com/your-repo/SLPM-enhanced)
+
+---
+
+## Acknowledgments
+
+- Starknet for L2 infrastructure
+- Atomiq Labs for Lightning/Starknet atomic swaps
+- Cashu for ecash protocol
+- Noir/Aztec for ZK circuits
+- Garaga for efficient on-chain verification

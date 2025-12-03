@@ -119,6 +119,226 @@ SLPM provides **military-grade financial privacy** through:
 - **No metadata leakage**: IP addresses, timing patterns, and amounts all protected
 - **Forward secrecy**: Even if secrets leak later, past transactions remain private
 
+---
+
+## Cross-Chain Privacy Swaps
+
+SLPM extends privacy beyond Starknet through cross-chain atomic swaps, enabling trustless, privacy-preserving transfers between Zcash (ZEC) and Starknet (STRK).
+
+### ZEC to STRK Flow
+
+```
+    ZEC --> STRK PRIVATE SWAP
+    ================================================================
+
+    User (ZEC)                                              User (STRK)
+        |                                                        ^
+        | 1. Send shielded ZEC (z-addr to z-addr)                |
+        v                                                        |
+    +-------------+                                              |
+    | FixedFloat  |  ZEC/BTC Exchange                            |
+    | Exchange    |                                              |
+    +-------------+                                              |
+        |                                                        |
+        | 2. BTC sent on-chain                                   |
+        v                                                        |
+    +-------------+                                              |
+    |  Atomiq     |  BTC -> STRK Atomic Swap (HTLC)              |
+    |  Protocol   |                                              |
+    +-------------+                                              |
+        |                                                        |
+        | 3. STRK received                                       |
+        v                                                        |
+    +-------------+                                              |
+    |  Privacy    |  Deposit with commitment                     |
+    |  Mixer      |  Generate ZK proof                           |
+    +-------------+                                              |
+        |                                                        |
+        | 4. (Optional) Cashu flow for additional privacy        |
+        v                                                        |
+    +-------------+                                              |
+    |  Cashu      |  Convert to bearer tokens                    |
+    |  Mint       |                                              |
+    +-------------+                                              |
+        |                                                        |
+        | 5. Withdraw to fresh wallet (ZK proof, no link)        |
+        +--------------------------------------------------------+
+
+    PRIVACY CHAIN: Zcash Shielded -> BTC -> STRK -> ZK Mixer -> Fresh Wallet
+```
+
+### STRK to ZEC Flow
+
+```
+    STRK --> ZEC PRIVATE SWAP
+    ================================================================
+
+    User (STRK)                                              User (ZEC)
+        |                                                        ^
+        | 1. Deposit to Privacy Mixer                            |
+        v                                                        |
+    +-------------+                                              |
+    |  Privacy    |  commitment = hash(secret, nullifier, amt)   |
+    |  Mixer      |  Store in Merkle tree                        |
+    +-------------+                                              |
+        |                                                        |
+        | 2. (Optional) Cashu flow                               |
+        v                                                        |
+    +-------------+                                              |
+    |  Cashu      |  Mint bearer tokens                          |
+    |  Mint       |  Blind signatures                            |
+    +-------------+                                              |
+        |                                                        |
+        | 3. Withdraw with ZK proof, initiate Lightning          |
+        v                                                        |
+    +-------------+                                              |
+    |  Atomiq     |  STRK -> Lightning HTLC atomic swap          |
+    |  Protocol   |                                              |
+    +-------------+                                              |
+        |                                                        |
+        | 4. Lightning to ZEC                                    |
+        v                                                        |
+    +-------------+                                              |
+    | FixedFloat  |  BTCLN -> ZEC (Shielded output)              |
+    | Exchange    |                                              |
+    +-------------+                                              |
+        |                                                        |
+        | 5. Receive shielded ZEC (z-address)                    |
+        +--------------------------------------------------------+
+
+    PRIVACY CHAIN: ZK Mixer -> Lightning -> Zcash Shielded
+```
+
+### Atomiq Protocol Integration
+
+The Atomiq Protocol enables trustless atomic swaps between Starknet and Bitcoin/Lightning using Hash Time-Locked Contracts (HTLCs):
+
+```
+    ATOMIQ ATOMIC SWAP (STRK <-> BTC/Lightning)
+    ================================================================
+
+    +-------------------+                      +-------------------+
+    |   User Wallet     |                      |  Atomiq Liquidity |
+    |   (Starknet)      |                      |  Provider (BTC)   |
+    +-------------------+                      +-------------------+
+            |                                          |
+            |  1. Create HTLC on Starknet              |
+            |     Lock STRK with hash(preimage)        |
+            +----------------------------------------->|
+            |                                          |
+            |  2. Create HTLC on Lightning             |
+            |     Lock BTC with same hash              |
+            |<-----------------------------------------+
+            |                                          |
+            |  3. User reveals preimage                |
+            |     Claims BTC on Lightning              |
+            +----------------------------------------->|
+            |                                          |
+            |  4. LP uses preimage                     |
+            |     Claims STRK on Starknet              |
+            |<-----------------------------------------+
+
+    SECURITY: Cryptographic atomicity - either both transfers complete
+              or both are refunded. No counterparty risk.
+```
+
+---
+
+## Zero-Knowledge Implementation
+
+SLPM uses Noir circuits compiled to UltraHonk proofs, verified on-chain via Garaga.
+
+### Noir Circuit Architecture
+
+```
+    NOIR CIRCUIT: Privacy Withdrawal Proof
+    ================================================================
+
+    PRIVATE INPUTS (known only to prover):
+    +----------------------------------------------------------------+
+    |  secret: Field              - Random value chosen at deposit   |
+    |  path_elements: [Field; 8]  - Merkle proof siblings            |
+    |  path_indices: [Field; 8]   - Left/right path indicators       |
+    +----------------------------------------------------------------+
+
+    PUBLIC INPUTS (verified on-chain):
+    +----------------------------------------------------------------+
+    |  nullifier_hash: Field      - Prevents double-spending         |
+    |  root: Field                - Merkle tree root                 |
+    |  recipient: Field           - Withdrawal address               |
+    |  amount_low: Field          - Amount (u128 low bits)           |
+    |  amount_high: Field         - Amount (u128 high bits)          |
+    +----------------------------------------------------------------+
+
+    CIRCUIT LOGIC:
+    +----------------------------------------------------------------+
+    |  1. commitment = Poseidon(secret, amount_low, amount_high)     |
+    |  2. nullifier = Poseidon(secret, commitment)                   |
+    |  3. assert nullifier_hash == Poseidon(nullifier)               |
+    |  4. computed_root = MerkleVerify(commitment, path, indices)    |
+    |  5. assert computed_root == root                               |
+    +----------------------------------------------------------------+
+```
+
+### Garaga Verification
+
+Garaga provides efficient on-chain ZK proof verification using native Cairo circuits:
+
+```
+    CLIENT SIDE                              STARKNET
+    +-----------------+                      +------------------------+
+    |                 |                      |                        |
+    | 1. Compute      |   proof + hints      |  4. Garaga Verifier    |
+    |    witness      | -------------------> |     - Parse proof      |
+    |                 |                      |     - Verify pairing   |
+    | 2. Generate     |                      |     - Extract pubins   |
+    |    UltraHonk    |                      |                        |
+    |    proof        |                      |  5. Privacy Mixer      |
+    |                 |                      |     - Check nullifier  |
+    | 3. Prepare      |                      |     - Verify root      |
+    |    calldata     |                      |     - Transfer funds   |
+    +-----------------+                      +------------------------+
+```
+
+---
+
+## SDK Integration
+
+SLPM provides a standalone SDK for programmatic integration:
+
+```bash
+npm install @slpm/sdk
+```
+
+```typescript
+import { SLPM } from '@slpm/sdk';
+
+const slpm = new SLPM({
+  account,
+  network: 'mainnet',
+  rpcUrl: 'https://starknet-mainnet.public.blastapi.io',
+});
+
+// Privacy deposit
+const deposit = await slpm.deposit({ amount: BigInt('1000000000000000000') });
+
+// Cross-chain swap
+await slpm.swap({
+  direction: 'strk-to-zec',
+  amount: '10',
+  destinationAddress: 'zs1...',
+});
+```
+
+| Module  | Import              | Purpose           |
+| ------- | ------------------- | ----------------- |
+| Core    | `@slpm/sdk`         | Main orchestrator |
+| Privacy | `@slpm/sdk/privacy` | Mixer operations  |
+| Swaps   | `@slpm/sdk/swaps`   | Cross-chain swaps |
+| Cashu   | `@slpm/sdk/cashu`   | Ecash operations  |
+
+---
+
 ## Technical Architecture
 
 This section provides detailed technical documentation of the SLPM architecture, component interactions, and execution flows.
@@ -521,19 +741,19 @@ All Full Mix privacy properties, plus:
 
 ### Privacy Comparison
 
-| Property | Full Mix | Split Mix (STRK) | Split Mix (Lightning) |
-|----------|----------|------------------|----------------------|
-| On-chain unlinkability | Yes | Yes | Yes |
-| Bearer token privacy | Yes | Yes | Yes |
-| Temporal disconnect | Minutes | Hours to Years | Hours to Years |
-| User custody | No (automated) | Yes (user-controlled) | Yes (user-controlled) |
-| Offline storage | No | Yes | Yes |
-| Peer-to-peer transfer | No | Yes | Yes |
-| Geographic flexibility | Limited | Complete | Complete |
-| Recovery options | Server-dependent | User-controlled | User-controlled |
-| Settlement destination | STRK only | STRK on-chain | Lightning off-chain |
-| Requires wallet connection | Yes | Yes (for claiming) | No |
-| Blockchain footprint | Starknet tx | Starknet tx | None |
+| Property                   | Full Mix         | Split Mix (STRK)      | Split Mix (Lightning) |
+| -------------------------- | ---------------- | --------------------- | --------------------- |
+| On-chain unlinkability     | Yes              | Yes                   | Yes                   |
+| Bearer token privacy       | Yes              | Yes                   | Yes                   |
+| Temporal disconnect        | Minutes          | Hours to Years        | Hours to Years        |
+| User custody               | No (automated)   | Yes (user-controlled) | Yes (user-controlled) |
+| Offline storage            | No               | Yes                   | Yes                   |
+| Peer-to-peer transfer      | No               | Yes                   | Yes                   |
+| Geographic flexibility     | Limited          | Complete              | Complete              |
+| Recovery options           | Server-dependent | User-controlled       | User-controlled       |
+| Settlement destination     | STRK only        | STRK on-chain         | Lightning off-chain   |
+| Requires wallet connection | Yes              | Yes (for claiming)    | No                    |
+| Blockchain footprint       | Starknet tx      | Starknet tx           | None                  |
 
 ## Privacy Mixer Contract: Breaking On-Chain Linkability
 
