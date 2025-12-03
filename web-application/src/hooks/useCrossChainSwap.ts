@@ -17,7 +17,6 @@ import { StarknetSigner, RpcProviderWithRetries } from '@atomiqlabs/chain-starkn
 import { ENV, getStarknetRpc } from '@/config/env';
 import { PRIVACY_MIXER } from '@/config/constants';
 import { RealCashuClient } from '@/integrations/cashu/client';
-import privacyMixerAbi from '@/config/privacy-mixer-abi.json';
 import { randomHex } from '@/crypto/bdhke';
 
 interface TransferStep {
@@ -26,6 +25,12 @@ interface TransferStep {
     description: string;
     status: 'pending' | 'in-progress' | 'complete' | 'failed';
     data?: Record<string, unknown>;
+}
+
+// Wallet signer interface for cross-chain operations
+interface WalletSignerInput {
+    address: string;
+    walletProvider: unknown;
 }
 
 interface CrossChainTransfer {
@@ -169,7 +174,7 @@ export function useCrossChainSwap() {
 
             // Step 2: Get BTC → STRK estimate using Atomiq rate
             let strkAmount = 0;
-            let btcToStrkFee = 0.5; // Default estimate
+            const btcToStrkFee = 0.5; // Default estimate
             let satsPerStrk = ENV.STRK_SATS_RATE || 125; // Default fallback
 
             if (atomiqClientRef.current) {
@@ -226,7 +231,7 @@ export function useCrossChainSwap() {
         try {
             // Step 1: Get the REAL Atomiq rate for STRK → Lightning
             let lightningAmount = 0;
-            let strkToLnFee = 0.5;
+            const strkToLnFee = 0.5;
             let satsPerStrk = ENV.STRK_SATS_RATE || 125; // Default fallback
 
             if (atomiqClientRef.current) {
@@ -451,7 +456,7 @@ export function useCrossChainSwap() {
     const initiateStrkToZec = useCallback(async (
         strkAmount: number,
         zecAddress: string,
-        walletSigner: any, // Starknet wallet signer
+        walletSigner: WalletSignerInput, // Starknet wallet signer
         options: PrivacyOptions = {}
     ): Promise<CrossChainTransfer | null> => {
         setIsLoading(true);
